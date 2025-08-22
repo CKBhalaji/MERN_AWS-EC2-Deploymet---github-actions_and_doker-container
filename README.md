@@ -184,9 +184,26 @@ sudo apt install -y git
 # Install Certbot for SSL
 sudo apt install -y certbot python3-certbot-nginx
 
+```
+
 ## Nginx Configuration
 
 After setting up your EC2 instance, you need to configure Nginx to serve your application. Replace the default Nginx configuration with the following:
+
+1.  Connect to your EC2 instance using SSH.
+2.  Use a text editor to create a new file in the `/etc/nginx/conf.d/` directory. We recommend using `vim`, which is a powerful text editor commonly found on Linux systems. To use `vim`, follow these steps:
+
+    a.  Open a new file in `vim` with the following command: `sudo vim /etc/nginx/conf.d/yaliaero.conf`
+    b.  Press the `i` key to enter insert mode. This will allow you to type text into the file.
+    c.  Copy the Nginx configuration from this guide and paste it into the file.
+    d.  Press the `Esc` key to exit insert mode.
+    e.  Type `:wq` and press `Enter` to save the file and exit `vim`.
+
+    If you prefer to use `nano`, you can use the following command: `sudo nano /etc/nginx/conf.d/yaliaero.conf`. Nano is a simpler text editor that is easier to use for beginners.
+3.  Copy the Nginx configuration from this guide and paste it into the file.
+4.  Save the file and exit the text editor.
+5.  Test the Nginx configuration: `sudo nginx -t`
+6.  If the configuration is correct, reload Nginx: `sudo systemctl reload nginx`
 
 ```nginx
 server {
@@ -228,23 +245,32 @@ server {
 
 **Important**: After deployment, replace `localhost` with your actual domain name. Also, make sure that the SSL certificates are located in the specified paths (`/etc/letsencrypt/live/yourdomain.com/fullchain.pem` and `/etc/letsencrypt/live/yourdomain.com/privkey.pem`).
 
-To place this Nginx configuration file in the `/etc/nginx/conf.d/` directory on the EC2 instance, follow these steps:
+After deploying your application and setting up your custom domain, you need to update the Nginx configuration file (`yaliaero.conf`) with your domain name and ensure the SSL certificates are correctly configured. Follow these steps:
 
 1.  Connect to your EC2 instance using SSH.
-2.  Use a text editor to create a new file in the `/etc/nginx/conf.d/` directory. We recommend using `vim`, which is a powerful text editor commonly found on Linux systems. To use `vim`, follow these steps:
+2.  Open the Nginx configuration file (`/etc/nginx/conf.d/yaliaero.conf`) using a text editor (e.g., `vim` or `nano`): `sudo vim /etc/nginx/conf.d/yaliaero.conf`
+3.  Update the `server_name` directives in both the HTTP and HTTPS server blocks to use your custom domain name. For example:
 
-    a.  Open a new file in `vim` with the following command: `sudo vim /etc/nginx/conf.d/yaliaero.conf`
-    b.  Press the `i` key to enter insert mode. This will allow you to type text into the file.
-    c.  Copy the Nginx configuration from this guide and paste it into the file.
-    d.  Press the `Esc` key to exit insert mode.
-    e.  Type `:wq` and press `Enter` to save the file and exit `vim`.
+    ```nginx
+    server {
+        listen 80;
+        server_name yourdomain.com;
+        return 301 https://$host$request_uri;
+    }
 
-    If you prefer to use `nano`, you can use the following command: `sudo nano /etc/nginx/conf.d/yaliaero.conf`. Nano is a simpler text editor that is easier to use for beginners.
-3.  Copy the Nginx configuration from this guide and paste it into the file.
-4.  Save the file and exit the text editor.
-5.  Test the Nginx configuration: `sudo nginx -t`
-6.  If the configuration is correct, reload Nginx: `sudo systemctl reload nginx`
-```
+    server {
+        listen 443 ssl;
+        server_name yourdomain.com;
+    ```
+4.  Verify that the `ssl_certificate` and `ssl_certificate_key` directives in the HTTPS server block point to the correct paths for your SSL certificates. Replace `yourdomain.com` with your actual domain name:
+
+    ```nginx
+    ssl_certificate /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
+    ```
+5.  Save the file and exit the text editor.
+6.  Test the Nginx configuration: `sudo nginx -t`
+7.  If the configuration is correct, reload Nginx: `sudo systemctl reload nginx`
 
 ## Setting Up GitHub Repository
 
@@ -581,6 +607,8 @@ In your GitHub repository, add these secrets. These values will be used by the G
 ### Step 4: Understanding the GitHub Actions Workflow
 
 The project includes a GitHub Actions workflow file at `.github/workflows/deploy.yml`. Here's what it does:
+
+**Note**: If you choose to use a GitHub-hosted runner with an SSH action for deployment, you will need to modify this workflow file to include the necessary SSH configuration. This may involve changing the `runs-on` value for the `deploy` job, adding the SSH action, and updating the steps to deploy the application to the EC2 instance. You may also need to add additional secrets, such as the SSH private key.
 
 ```yaml
 name: Deploy YaliAero MERN Application
