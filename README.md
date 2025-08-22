@@ -78,8 +78,10 @@ This guide is designed for absolute beginners who have never used AWS or GitHub 
    - SSH: Port 22, Source: Anywhere (0.0.0.0/0)
    - HTTP: Port 80, Source: Anywhere (0.0.0.0/0)
    - HTTPS: Port 443, Source: Anywhere (0.0.0.0/0)
-   - Custom TCP: Port 5000, Source: Anywhere (0.0.0.0/0) - *Note: While this opens port 5000 at the network level, your backend's CORS configuration will restrict application-level access to your frontend's URL.*
-   - Custom TCP: Port 27017, Source: Anywhere (0.0.0.0/0)
+   - Custom TCP: Port 5000, Source: Your IP (This port should only be accessible from your local machine for development purposes)
+   - Custom TCP: Port 27017, Source: Your IP (This port should only be accessible from your local machine for development purposes)
+
+**Important Security Note**: Do NOT open ports 5000 and 27017 to the public (0.0.0.0/0) in your security group. This is a major security risk. Your backend should only be accessed through Nginx, and your database should only be accessed by the backend container within the Docker network.
 
 ### Step 7: Configure Storage
 
@@ -155,12 +157,10 @@ Once you're connected to your EC2 instance, run these commands to set up the env
 sudo apt update
 sudo apt upgrade -y
 
-# Install Docker
-sudo apt install -y apt-transport-https ca-certificates curl software-properties-common
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
-sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
-sudo apt update
-sudo apt install -y docker-ce
+# Install Docker and Docker Compose
+sudo apt install -y docker-ce docker-compose-plugin
+
+# Start Docker
 sudo systemctl start docker
 sudo systemctl enable docker
 sudo usermod -aG docker ubuntu
@@ -175,50 +175,75 @@ Reconnect to your instance using the same method as before, then continue:
 # Verify Docker is working
 docker --version
 
-# Install Docker Compose
-sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-sudo chmod +x /usr/local/bin/docker-compose
-
 # Verify Docker Compose is working
-docker-compose --version
+docker compose version
 
 # Install Git
 sudo apt install -y git
 
-# Install MongoDB
-# Note: If you are using Docker Compose to run MongoDB as a container (as described in "Setting Up Dockerfiles and Docker Compose"), you can skip these manual MongoDB installation steps on the EC2 instance.
-curl -fsSL https://pgp.mongodb.com/server-6.0.asc | sudo gpg -o /usr/share/keyrings/mongodb-server-6.0.gpg --dearmor
-
-echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-6.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/6.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-6.0.list
-
-sudo apt update
-sudo apt install -y mongodb-org
-
-# Start MongoDB
-sudo systemctl start mongod
-sudo systemctl enable mongod
-
-# Configure MongoDB Security
-mongosh --eval '
-  use admin;
-  db.createUser({
-    user: "adminUser",
-    pwd: "your_secure_password",
-    roles: [{ role: "userAdminAnyDatabase", db: "admin" }]
-  });
-'
-
-# Enable authentication in MongoDB config
-sudo nano /etc/mongod.conf
-# Add these lines:
-# security:
-#   authorization: enabled
-
-# Restart MongoDB
-sudo systemctl restart mongod
-
 # Install Certbot for SSL
 sudo apt install -y certbot python3-certbot-nginx
+
+## Nginx Configuration
+
+After setting up your EC2 instance, you need to configure Nginx to serve your application. Replace the default Nginx configuration with the following:
+
+```nginx
+server {
+    listen 80;
+    server_name localhost;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name localhost;
+
+    ssl_certificate /etc/letsencrypt/live/localhost/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/localhost/privkey.pem;
+
+    location / {
+        proxy_pass http://yaliaero-frontend-container:80;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        add_header Cache-Control "public, max-age=3600";
+    }
+
+    location /api/ {
+        proxy_pass http://yaliaero-backend-container:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    error_page 500 502 503 504 /50x.html;
+    location = /50x.html {
+        root /usr/share/nginx/html;
+    }
+}
+```
+
+**Important**: After deployment, replace `localhost` with your actual domain name. Also, make sure that the SSL certificates are located in the specified paths (`/etc/letsencrypt/live/yourdomain.com/fullchain.pem` and `/etc/letsencrypt/live/yourdomain.com/privkey.pem`).
+
+To place this Nginx configuration file in the `/etc/nginx/conf.d/` directory on the EC2 instance, follow these steps:
+
+1.  Connect to your EC2 instance using SSH.
+2.  Use a text editor to create a new file in the `/etc/nginx/conf.d/` directory. We recommend using `vim`, which is a powerful text editor commonly found on Linux systems. To use `vim`, follow these steps:
+
+    a.  Open a new file in `vim` with the following command: `sudo vim /etc/nginx/conf.d/yaliaero.conf`
+    b.  Press the `i` key to enter insert mode. This will allow you to type text into the file.
+    c.  Copy the Nginx configuration from this guide and paste it into the file.
+    d.  Press the `Esc` key to exit insert mode.
+    e.  Type `:wq` and press `Enter` to save the file and exit `vim`.
+
+    If you prefer to use `nano`, you can use the following command: `sudo nano /etc/nginx/conf.d/yaliaero.conf`. Nano is a simpler text editor that is easier to use for beginners.
+3.  Copy the Nginx configuration from this guide and paste it into the file.
+4.  Save the file and exit the text editor.
+5.  Test the Nginx configuration: `sudo nginx -t`
+6.  If the configuration is correct, reload Nginx: `sudo systemctl reload nginx`
 ```
 
 ## Setting Up GitHub Repository
@@ -366,7 +391,7 @@ dist
 
 ### Step 4: Create `docker-compose.yml`
 
-This file will define and run your multi-container Docker application. Create a file named `docker-compose.yml` in the root of your project (`YaliAero_Website/`) with the following content.
+This file will define and run your multi-container Docker application. Create a file named `docker-compose.yml` in the root of your project directory (`YaliAero_Website/`).
 
 **Important**: This `docker-compose.yml` uses environment variable substitution (e.g., `${MONGO_PASSWORD}`). This means that the actual values for these variables will be provided at runtime from the environment where `docker-compose up` is executed (e.g., from GitHub Actions secrets or a local `.env` file). **Do not hardcode sensitive information directly into this file.**
 
@@ -383,19 +408,19 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV}
       MONGO_URI: mongodb://adminUser:${MONGO_PASSWORD}@mongodb:27017/yaliaero_db?authSource=admin
-      JWT_SECRET: ${JWT_SECRET}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
       PORT: ${PORT}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
-      AWS_REGION: ${AWS_REGION}
-      S3_BUCKET: ${S3_BUCKET}
-      VERIFICATION_TOKEN_SECRET: ${VERIFICATION_TOKEN_SECRET}
-      ASSOCIATE_VERIFICATION_TOKEN_SECRET: ${ASSOCIATE_VERIFICATION_TOKEN_SECRET}
-      EMAIL_HOST: ${EMAIL_HOST}
-      EMAIL_PORT: ${EMAIL_PORT}
-      EMAIL_USER: ${EMAIL_USER}
-      EMAIL_PASS: ${EMAIL_PASS}
-      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      S3_BUCKET: ${{ secrets.S3_BUCKET }}
+      VERIFICATION_TOKEN_SECRET: ${{ secrets.VERIFICATION_TOKEN_SECRET }}
+      ASSOCIATE_VERIFICATION_TOKEN_SECRET: ${{ secrets.ASSOCIATE_VERIFICATION_TOKEN_SECRET }}
+      EMAIL_HOST: ${{ secrets.EMAIL_HOST }}
+      EMAIL_PORT: ${{ secrets.EMAIL_PORT }}
+      EMAIL_USER: ${{ secrets.EMAIL_USER }}
+      EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+      FRONTEND_BASE_URL: ${{ secrets.FRONTEND_BASE_URL }}
     depends_on:
       - mongodb
     networks:
@@ -481,6 +506,9 @@ screen -S github-runner
 ### Step 2: Set Up Docker Hub
 
 1. Go to [https://hub.docker.com/](https://hub.docker.com/)
+
+**Note**: Instead of using a self-hosted runner, you can also use a GitHub-hosted runner with an SSH action for deployment. This approach requires less manual setup on the EC2 instance.
+
 2. Click "Sign Up" if you don't have an account
 3. Create two repositories:
    - Click "Create Repository"
@@ -500,7 +528,7 @@ In your GitHub repository, add these secrets. These values will be used by the G
    Value: `ubuntu`
 
 3. Name: `JWT_SECRET`
-   Value: A secure random string for JWT authentication (e.g., generate one at [https://randomkeygen.com/](https://randomkeygen.com/))
+   Value: A secure random string for verification tokens (e.g., generate one at [https://randomkeygen.com/](https://randomkeygen.com/))
 
 4. Name: `DOCKER_USERNAME`
    Value: Your Docker Hub username
@@ -709,7 +737,7 @@ To make changes to your application:
 2. Commit the changes:
    ```bash
    git add .
-   git commit -m "Your commit message"
+   git commit -m "Initial commit for YaliAero MERN app"
    ```
 3. Push to GitHub:
    ```bash
@@ -831,26 +859,12 @@ To make changes to your application:
 
 Congratulations! You've successfully set up the deployment guide for your YaliAero MERN application to AWS EC2 using GitHub Actions. Your application will be accessible on the internet, and any changes you push to your GitHub repository will be automatically deployed.
 
-If you need further assistance, please refer to the AWS documentation or GitHub Actions documentation, or reach out to the community for help.
+## Improving the Robustness of Your Deployment
 
-</final_file_content>
+This guide provides a basic setup for deploying your YaliAero MERN application. To further improve the robustness of your deployment, consider the following:
 
-IMPORTANT: For any future changes to this file, use the final_file_content shown above as your reference. This content reflects the current state of the file, including any auto-formatting (e.g., if you used single quotes but the formatter converted them to double quotes). Always base your SEARCH/REPLACE operations on this final version to ensure accuracy.
-
-<environment_details>
-# VSCode Visible Files
-deployment_readme.md
-
-# VSCode Open Tabs
-docker-compose.yml
-deployment_readme.md
-
-# Current Time
-8/22/2025, 3:07:50 PM (Asia/Calcutta, UTC+5.5:00)
-
-# Context Window Usage
-222,973 / 1,048.576K tokens used (21%)
-
-# Current Mode
-ACT MODE
-</environment_details>
+1.  **Infrastructure as Code (IaC)**: Use tools like Terraform or CloudFormation to automate the creation and management of your AWS infrastructure.
+2.  **Monitoring and Logging**: Implement comprehensive monitoring and logging to track the health and performance of your application. Consider using tools like CloudWatch, ELK stack, or Prometheus.
+3.  **Scalability**: Design your application to handle increasing traffic and data. Consider using load balancers, auto-scaling groups, and database replication.
+4.  **Disaster Recovery**: Implement a plan to recover your application in case of a disaster. Consider using backups, replication, and failover mechanisms.
+5.  **Security**: Implement security best practices to protect your application and data. Consider using firewalls, intrusion detection systems, and regular security audits.
