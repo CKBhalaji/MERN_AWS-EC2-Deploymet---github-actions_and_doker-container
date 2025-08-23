@@ -75,13 +75,11 @@ This guide is designed for absolute beginners who have never used AWS or GitHub 
 2. Make sure "Auto-assign public IP" is set to "Enable"
 3. Under "Firewall (security groups)", select "Create security group"
 4. Make sure the following rules are added:
-   - SSH: Port 22, Source: Anywhere (0.0.0.0/0)
-   - HTTP: Port 80, Source: Anywhere (0.0.0.0/0)
-   - HTTPS: Port 443, Source: Anywhere (0.0.0.0/0)
-   - Custom TCP: Port 5000, Source: Your IP (This port should only be accessible from your local machine for development purposes)
-   - Custom TCP: Port 27017, Source: Your IP (This port should only be accessible from your local machine for development purposes)
+   - SSH: Port 22, Source: Anywhere (0.0.0.0/0) (For connecting to your instance)
+   - HTTP: Port 80, Source: Anywhere (0.0.0.0/0) (For web traffic)
+   - HTTPS: Port 443, Source: Anywhere (0.0.0.0/0) (For secure web traffic)
 
-**Important Security Note**: Do NOT open ports 5000 and 27017 to the public (0.0.0.0/0) in your security group. This is a major security risk. Your backend should only be accessed through Nginx, and your database should only be accessed by the backend container within the Docker network.
+**Important Security Note**: You do not need to open ports `5000` (backend) or `27017` (database) in your security group. These services will run within a private Docker network and will not be exposed to the public internet. Nginx, running on ports 80 and 443, will be the only entry point to your application, which is a much more secure configuration.
 
 ### Step 7: Configure Storage
 
@@ -188,7 +186,14 @@ sudo apt install -y certbot python3-certbot-nginx
 
 ## Nginx Configuration
 
-After setting up your EC2 instance, you need to configure Nginx to serve your application. Replace the default Nginx configuration with the following:
+After setting up your EC2 instance, you need to configure Nginx to serve your application. There are two Nginx configurations used in this project:
+
+1.  **`client-vite/frontend-nginx.conf`**: This configuration is copied into the frontend Docker image. It's used for serving the static frontend files and proxying API requests to the backend container *within the Docker network*.
+2.  **`yaliaero.conf`**: This configuration is intended for the Nginx server running directly on the EC2 instance (the host). It acts as a main reverse proxy, handling SSL and routing traffic to the Docker containers.
+
+**For the EC2 instance deployment:**
+
+You will use the `yaliaero.conf` file. Follow these steps to configure Nginx on your EC2 instance:
 
 1.  Connect to your EC2 instance using SSH.
 2.  Use a text editor to create a new file in the `/etc/nginx/conf.d/` directory. We recommend using `vim`, which is a powerful text editor commonly found on Linux systems. To use `vim`, follow these steps:
@@ -205,43 +210,59 @@ After setting up your EC2 instance, you need to configure Nginx to serve your ap
 5.  Test the Nginx configuration: `sudo nginx -t`
 6.  If the configuration is correct, reload Nginx: `sudo systemctl reload nginx`
 
-```nginx
-server {
-    listen 80;
-    server_name localhost;
-    return 301 https://$host$request_uri;
-}
+### How the Nginx Configuration Works
 
-server {
-    listen 443 ssl;
-    server_name localhost;
+Nginx acts as a reverse proxy in this setup, handling incoming requests and forwarding them to the appropriate backend servers. Here's a breakdown of how the configuration works:
 
-    ssl_certificate /etc/letsencrypt/live/localhost/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/localhost/privkey.pem;
+*   **server blocks**: The `server` blocks define the configuration for different domains or subdomains. In this case, we have two server blocks: one for HTTP (port 80) and one for HTTPS (port 443). The HTTP server block redirects all traffic to HTTPS.
+*   **location blocks**: The `location` blocks define how Nginx handles requests to different paths.
+    *   The `location /` block handles all requests to the root path and forwards them to the frontend container (`frontend`) on port 80.
+    *   The `location /api/` block handles all requests to paths starting with `/api/` and forwards them to the backend container.
+*   **proxy_pass directive**: The `proxy_pass` directive specifies the address of the backend server to which the request should be forwarded. The line `proxy_pass http://backend:5000;` tells Nginx to send the request to the backend container at its internal address on port 5000. This communication happens securely inside the private Docker network and does **not** expose port 5000 to the public internet.
+*   **proxy_set_header directives**: The `proxy_set_header` directives pass information about the original request to the backend servers. This information includes the host, the client's IP address, and the protocol used (HTTP or HTTPS).
+*   **add_header Cache-Control directive**: The `add_header Cache-Control` directive sets the cache control headers for static assets served by the frontend. This tells the browser how long to cache these assets, which can improve performance.
+*   **error_page directive**: The `error_page` directive handles errors. In this case, it specifies that if an error occurs (500, 502, 503, or 504), Nginx should display the `50x.html` file.
 
-    location / {
-        proxy_pass http://yaliaero-frontend-container:80;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        add_header Cache-Control "public, max-age=3600";
-    }
+This Nginx configuration is correctly aligned with the project structure because it forwards requests to the appropriate containers based on the URL path. Requests to the root path are handled by the frontend container, and requests to the `/api/` path are handled by the backend container.
 
-    location /api/ {
-        proxy_pass http://yaliaero-backend-container:5000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
 
-    error_page 500 502 503 504 /50x.html;
-    location = /50x.html {
-        root /usr/share/nginx/html;
-    }
-}
-```
+   ```nginx
+   server {
+      listen 80;
+      server_name localhost;
+      return 301 https://$host$request_uri;
+   }
+
+   server {
+      listen 443 ssl;
+      server_name localhost;
+
+      ssl_certificate /etc/letsencrypt/live/localhost/fullchain.pem;
+      ssl_certificate_key /etc/letsencrypt/live/localhost/privkey.pem;
+
+      location / {
+         proxy_pass http://frontend:80;
+         proxy_set_header Host $host;
+         proxy_set_header X-Real-IP $remote_addr;
+         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+         proxy_set_header X-Forwarded-Proto $scheme;
+         add_header Cache-Control "public, max-age=3600";
+      }
+
+      location /api/ {
+         proxy_pass http://backend:5000;
+         proxy_set_header Host $host;
+         proxy_set_header X-Real-IP $remote_addr;
+         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+         proxy_set_header X-Forwarded-Proto $scheme;
+      }
+
+      error_page 500 502 503 504 /50x.html;
+      location = /50x.html {
+         root /usr/share/nginx/html;
+      }
+   }
+   ```
 
 **Important**: After deployment, replace `localhost` with your actual domain name. Also, make sure that the SSL certificates are located in the specified paths (`/etc/letsencrypt/live/yourdomain.com/fullchain.pem` and `/etc/letsencrypt/live/yourdomain.com/privkey.pem`).
 
@@ -371,7 +392,8 @@ RUN npm install
 COPY . .
 
 # Build the React application
-RUN npm run build
+ENV NODE_ENV=development
+RUN VITE_API_BASE_URL=http://localhost npm run build
 
 # Use Nginx to serve the static files
 FROM nginx:alpine
@@ -429,8 +451,10 @@ services:
     build: ./server
     container_name: yaliaero-backend-container
     restart: always
-    ports:
-      - "5000:5000"
+    # The backend port is not exposed to the host.
+    # Nginx forwards requests to it over the internal Docker network.
+    # ports:
+    #   - "5000:5000"
     environment:
       NODE_ENV: ${NODE_ENV}
       MONGO_URI: mongodb://adminUser:${MONGO_PASSWORD}@mongodb:27017/yaliaero_db?authSource=admin
@@ -469,8 +493,10 @@ services:
     image: mongo:6.0
     container_name: yaliaero-mongodb
     restart: always
-    ports:
-      - "27017:27017"
+    # The database port is not exposed to the host.
+    # The backend service connects to it over the internal Docker network.
+    # ports:
+    #   - "27017:27017"
     environment:
       MONGO_INITDB_ROOT_USERNAME: adminUser
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD} # Use environment variable for MongoDB root password
@@ -603,6 +629,8 @@ In your GitHub repository, add these secrets. These values will be used by the G
 
 19. Name: `NODE_ENV`
     Value: `production`
+
+**Note on Email Service Ports**: You do not need to open port 587 (or any other email port) in your EC2 security group's **inbound** rules. Your application makes an **outbound** connection to the email server, and all outbound traffic is allowed by default. This setup is secure and correct.
 
 ### Step 4: Understanding the GitHub Actions Workflow
 
@@ -896,3 +924,677 @@ This guide provides a basic setup for deploying your YaliAero MERN application. 
 3.  **Scalability**: Design your application to handle increasing traffic and data. Consider using load balancers, auto-scaling groups, and database replication.
 4.  **Disaster Recovery**: Implement a plan to recover your application in case of a disaster. Consider using backups, replication, and failover mechanisms.
 5.  **Security**: Implement security best practices to protect your application and data. Consider using firewalls, intrusion detection systems, and regular security audits.
+
+
+## Setting Up GitHub Repository
+
+### Step 1: Create a GitHub Account (if you don't have one)
+
+1. Go to [https://github.com/](https://github.com/)
+2. Click "Sign up"
+3. Follow the instructions to create your account
+
+### Step 2: Create a New Repository
+
+1. Click the "+" icon in the top-right corner
+2. Select "New repository"
+3. Enter a repository name (e.g., "YaliAero_Website")
+4. Choose "Public" or "Private"
+5. Click "Create repository"
+
+### Step 3: Push Your Code to GitHub
+
+On your local machine (not the EC2 instance), navigate to your project folder (the root of `YaliAero_Website`) and run:
+
+```bash
+# Initialize Git repository (if not already done)
+git init
+
+# Add all files
+git add .
+
+# Commit the files
+git commit -m "Initial commit for YaliAero MERN app"
+
+# Add the remote repository
+git remote add origin https://github.com/your-username/YaliAero_Website.git
+
+# Push to GitHub
+git push -u origin main
+```
+
+Replace "your-username" with your actual GitHub username.
+
+## Setting Up Dockerfiles and Docker Compose
+
+We will containerize your frontend and backend applications using Docker.
+
+### Step 1: Create `server/Dockerfile`
+
+This Dockerfile will build your Node.js backend application, including Python dependencies. Create a file named `Dockerfile` inside the `server/` directory with the following content:
+
+```dockerfile
+# Use an official Node.js runtime as a parent image
+FROM node:20-alpine
+
+# Set the working directory in the container
+WORKDIR /app
+
+# Install Python and pip
+RUN apk add --no-cache python3 py3-pip
+
+# Copy package.json and package-lock.json to the working directory
+COPY package*.json ./
+
+# Install Node.js dependencies
+RUN npm install
+
+# Copy Python requirements and install them
+COPY requirements.txt ./
+RUN pip3 install --no-cache-dir -r requirements.txt
+
+# Copy the rest of the application code
+COPY . .
+
+# Expose the port the app runs on
+EXPOSE 5000
+
+# Define the command to run the application
+# Assuming the Node.js server is the primary entry point, and Python scripts are called from Node.js
+CMD ["npm", "start"]
+```
+
+### Step 2: Create `client-vite/Dockerfile`
+
+This Dockerfile will build your React frontend application and serve it using Nginx. Create a file named `Dockerfile` inside the `client-vite/` directory with the following content:
+
+```dockerfile
+# Use an official Node.js runtime as a parent image
+FROM node:20-alpine as build
+
+# Set the working directory in the container
+WORKDIR /app
+
+# Copy package.json and package-lock.json to the working directory
+COPY package*.json ./
+
+# Install dependencies
+RUN npm install
+
+# Copy the rest of the application code
+COPY . .
+
+# Build the React application
+ENV NODE_ENV=development
+RUN VITE_API_BASE_URL=http://localhost npm run build
+
+# Use Nginx to serve the static files
+FROM nginx:alpine
+
+# Copy the built React app to Nginx's public directory
+COPY --from=build /app/dist /usr/share/nginx/html
+
+# Expose port 80
+EXPOSE 80
+
+# Start Nginx
+CMD ["nginx", "-g", "daemon off;"]
+```
+
+### Step 3: Create `.dockerignore` files
+
+To optimize your Docker builds and prevent unnecessary files from being copied into your Docker images, create `.dockerignore` files in both your `server/` and `client-vite/` directories.
+
+**`server/.dockerignore`**:
+Create a file named `.dockerignore` inside the `server/` directory with the following content:
+```
+node_modules
+npm-debug.log
+.env
+data/logs.sqlite
+data/cache/
+.git
+.gitignore
+README.md
+```
+
+**`client-vite/.dockerignore`**:
+Create a file named `.dockerignore` inside the `client-vite/` directory with the following content:
+```
+node_modules
+npm-debug.log
+.env
+.git
+.gitignore
+README.md
+dist
+```
+
+### Step 4: Create `docker-compose.yml`
+
+This file will define and run your multi-container Docker application. Create a file named `docker-compose.yml` in the root of your project directory (`YaliAero_Website/`).
+
+**Important**: This `docker-compose.yml` uses environment variable substitution (e.g., `${MONGO_PASSWORD}`). This means that the actual values for these variables will be provided at runtime from the environment where `docker-compose up` is executed (e.g., from GitHub Actions secrets or a local `.env` file). **Do not hardcode sensitive information directly into this file.**
+
+```yaml
+version: '3.8'
+
+services:
+  backend:
+    build: ./server
+    container_name: yaliaero-backend-container
+    restart: always
+    # The backend port is not exposed to the host.
+    # Nginx forwards requests to it over the internal Docker network.
+    # ports:
+    #   - "5000:5000"
+    environment:
+      NODE_ENV: ${NODE_ENV}
+      MONGO_URI: mongodb://adminUser:${MONGO_PASSWORD}@mongodb:27017/yaliaero_db?authSource=admin
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      PORT: ${PORT}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      S3_BUCKET: ${{ secrets.S3_BUCKET }}
+      VERIFICATION_TOKEN_SECRET: ${{ secrets.VERIFICATION_TOKEN_SECRET }}
+      ASSOCIATE_VERIFICATION_TOKEN_SECRET: ${{ secrets.ASSOCIATE_VERIFICATION_TOKEN_SECRET }}
+      EMAIL_HOST: ${{ secrets.EMAIL_HOST }}
+      EMAIL_PORT: ${{ secrets.EMAIL_PORT }}
+      EMAIL_USER: ${{ secrets.EMAIL_USER }}
+      EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+      FRONTEND_BASE_URL: ${{ secrets.FRONTEND_BASE_URL }}
+    depends_on:
+      - mongodb
+    networks:
+      - mern-network
+
+  frontend:
+    build: ./client-vite
+    container_name: yaliaero-frontend-container
+    restart: always
+    ports:
+      - "80:80"
+    environment:
+      VITE_API_BASE_URL: http://backend:5000 # This points to the backend service within the Docker network
+    depends_on:
+      - backend
+    networks:
+      - mern-network
+
+  mongodb:
+    image: mongo:6.0
+    container_name: yaliaero-mongodb
+    restart: always
+    # The database port is not exposed to the host.
+    # The backend service connects to it over the internal Docker network.
+    # ports:
+    #   - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: adminUser
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD} # Use environment variable for MongoDB root password
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - mern-network
+
+volumes:
+  mongodb_data:
+
+networks:
+  mern-network:
+    driver: bridge
+```
+
+**Data Persistence for MongoDB with Docker Volumes**:
+
+When you run MongoDB as a Docker container using `docker-compose.yml`, its data is stored in a Docker volume. In this setup, we've defined a named volume called `mongodb_data`.
+
+*   **`volumes: - mongodb_data:/data/db`**: This line in the `mongodb` service definition tells Docker to mount the `mongodb_data` volume to the `/data/db` directory inside the MongoDB container. This `/data/db` directory is where MongoDB stores its data files.
+*   **`volumes: mongodb_data:`**: This top-level `volumes` definition declares `mongodb_data` as a named volume. Docker manages this volume, and its data persists on the host machine (your EC2 instance) even if the `yaliaero-mongodb` container is stopped, removed, or recreated.
+
+This means your MongoDB data will **not** be erased when you restart or update your Docker containers. It will remain safely stored in the `mongodb_data` volume on your EC2 instance.
+
+## Setting Up GitHub Actions
+
+### Step 1: Set Up GitHub Actions Runner on EC2
+
+1. On your EC2 instance, create a directory for the runner:
+```bash
+mkdir actions-runner && cd actions-runner
+```
+
+2. Go to your GitHub repository
+3. Click on "Settings" tab
+4. In the left sidebar, click on "Actions" → "Runners"
+5. Click "New self-hosted runner"
+6. Select "Linux" as the operating system
+7. Follow the commands shown on the page to:
+   - Download the runner package
+   - Extract it
+   - Configure and start the runner
+
+8. Keep the runner service running (you can use `screen` or `tmux` to keep it running after disconnecting):
+```bash
+# Install screen if not already installed
+sudo apt install screen
+
+# Create a new screen session
+screen -S github-runner
+
+# Start the runner
+./run.sh
+
+# Detach from screen (press Ctrl+A, then D)
+```
+
+### Step 2: Set Up Docker Hub
+
+1. Go to [https://hub.docker.com/](https://hub.docker.com/)
+
+**Note**: Instead of using a self-hosted runner, you can also use a GitHub-hosted runner with an SSH action for deployment. This approach requires less manual setup on the EC2 instance.
+
+2. Click "Sign Up" if you don't have an account
+3. Create two repositories:
+   - Click "Create Repository"
+   - Name the first one `yaliaero-backend`
+   - Set visibility to "Public"
+   - Click "Create"
+   - Repeat for `yaliaero-frontend`
+
+### Step 3: Add GitHub Secrets
+
+In your GitHub repository, add these secrets. These values will be used by the GitHub Actions workflow and injected into your Docker containers at deployment time.
+
+1. Name: `EC2_HOST`
+   Value: Your EC2 instance's public IP address
+
+2. Name: `EC2_USER`
+   Value: `ubuntu`
+
+3. Name: `JWT_SECRET`
+   Value: A secure random string for verification tokens (e.g., generate one at [https://randomkeygen.com/](https://randomkeygen.com/))
+
+4. Name: `DOCKER_USERNAME`
+   Value: Your Docker Hub username
+
+5. Name: `DOCKER_PASSWORD`
+   Value: Your Docker Hub password or access token (recommended)
+
+6. Name: `MONGO_USER`
+   Value: Your MongoDB username (e.g., `adminUser`)
+
+7. Name: `MONGO_PASSWORD`
+   Value: Your MongoDB password (the one you set during MongoDB setup)
+
+8. Name: `AWS_ACCESS_KEY_ID`
+   Value: Your AWS Access Key ID
+
+9. Name: `AWS_SECRET_ACCESS_KEY`
+   Value: Your AWS Secret Access Key
+
+10. Name: `AWS_REGION`
+    Value: `ap-south-1`
+
+11. Name: `S3_BUCKET`
+    Value: The name of your S3 bucket
+
+12. Name: `VERIFICATION_TOKEN_SECRET`
+    Value: A secure random string for verification tokens
+
+13. Name: `ASSOCIATE_VERIFICATION_TOKEN_SECRET`
+    Value: A secure random string for associate verification tokens
+
+14. Name: `EMAIL_HOST`
+    Value: `smtp.gmail.com`
+
+15. Name: `EMAIL_PORT`
+    Value: `587`
+
+16. Name: `EMAIL_USER`
+    Value: Your email address for sending emails
+
+17. Name: `EMAIL_PASS`
+    Value: Your email password or app-specific password
+
+18. Name: `FRONTEND_BASE_URL`
+    Value: The public URL of your deployed frontend (e.g., `https://yourdomain.com`)
+
+19. Name: `NODE_ENV`
+    Value: `production`
+
+**Note on Email Service Ports**: You do not need to open port 587 (or any other email port) in your EC2 security group's **inbound** rules. Your application makes an **outbound** connection to the email server, and all outbound traffic is allowed by default. This setup is secure and correct.
+
+### Step 4: Understanding the GitHub Actions Workflow
+
+The project includes a GitHub Actions workflow file at `.github/workflows/deploy.yml`. Here's what it does:
+
+**Note**: If you choose to use a GitHub-hosted runner with an SSH action for deployment, you will need to modify this workflow file to include the necessary SSH configuration. This may involve changing the `runs-on` value for the `deploy` job, adding the SSH action, and updating the steps to deploy the application to the EC2 instance. You may also need to add additional secrets, such as the SSH private key.
+
+```yaml
+name: Deploy YaliAero MERN Application
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+
+      - name: Login to Docker Hub
+        run: docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build Backend Image
+        run: docker build -t ${{ secrets.DOCKER_USERNAME }}/yaliaero-backend:latest ./server
+
+      - name: Build Frontend Image
+        run: docker build -t ${{ secrets.DOCKER_USERNAME }}/yaliaero-frontend:latest ./client-vite
+
+      - name: Push Images to Docker Hub
+        run: |
+          docker push ${{ secrets.DOCKER_USERNAME }}/yaliaero-backend:latest
+          docker push ${{ secrets.DOCKER_USERNAME }}/yaliaero-frontend:latest
+
+  deploy:
+    needs: build
+    runs-on: self-hosted
+    steps:
+      - name: Checkout Source (for docker-compose.yml)
+        uses: actions/checkout@v4
+
+      - name: Pull Images from Docker Hub
+        run: |
+          docker pull ${{ secrets.DOCKER_USERNAME }}/yaliaero-backend:latest
+          docker pull ${{ secrets.DOCKER_USERNAME }}/yaliaero-frontend:latest
+
+      - name: Stop and Remove Old Containers
+        run: |
+          docker-compose -f docker-compose.yml down || true
+
+      - name: Run Docker Compose
+        run: |
+          docker-compose -f docker-compose.yml up -d
+        env:
+          MONGO_URI: mongodb://adminUser:${{ secrets.MONGO_PASSWORD }}@mongodb:27017/yaliaero_db?authSource=admin
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          PORT: 5000
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+          VERIFICATION_TOKEN_SECRET: ${{ secrets.VERIFICATION_TOKEN_SECRET }}
+          ASSOCIATE_VERIFICATION_TOKEN_SECRET: ${{ secrets.ASSOCIATE_VERIFICATION_TOKEN_SECRET }}
+          EMAIL_HOST: ${{ secrets.EMAIL_HOST }}
+          EMAIL_PORT: ${{ secrets.EMAIL_PORT }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+          FRONTEND_BASE_URL: ${{ secrets.FRONTEND_BASE_URL }}
+          NODE_ENV: production
+```
+
+## Deploying Your Application
+
+### Step 1: Set Up Docker Network
+
+On your EC2 instance, create a Docker network for container communication:
+
+```bash
+docker network create mern-network
+```
+
+### Step 2: Configure GitHub Actions Runner
+
+Make sure your GitHub Actions runner is properly configured and running. You can check its status with:
+
+```bash
+# If using screen, reattach to the runner session
+screen -r github-runner
+
+# Check if the runner is connected and idle
+# Press Ctrl+A, then D to detach from screen
+```
+
+### Step 3: Understanding Container Management
+
+The deployment process is now fully automated through GitHub Actions:
+
+1. **Container Naming**:
+   - Backend container: `yaliaero-backend-container`
+   - Frontend container: `yaliaero-frontend-container`
+
+2. **Network Configuration**:
+   - All containers use the `mern-network` Docker network
+   - Frontend can access backend via `http://backend:5000` (as defined in `docker-compose.yml`)
+
+3. **Environment Variables**:
+   - Backend receives `JWT_SECRET`, `MONGO_URI`, `PORT`, AWS credentials, S3 bucket name, verification token secrets, email service credentials, `FRONTEND_BASE_URL`, and `NODE_ENV` from GitHub Secrets (passed to `docker-compose.yml` and then to the container).
+   - Frontend is configured with the correct API URL (`VITE_API_BASE_URL`).
+
+4. **Port Mapping**:
+   - Frontend is accessible on port 80
+   - Backend is accessible on port 5000 (within the EC2 instance, not directly exposed to public unless configured otherwise)
+
+5. **Container Lifecycle**:
+   - Old containers are automatically removed by `docker-compose down`
+   - New containers are created with fresh images by `docker-compose up -d`
+   - Containers run in detached mode
+
+### Step 4: Configure Domain and SSL
+
+1. **Configure Your Domain**:
+   - Go to your domain registrar's website
+   - Add an A record pointing to your EC2 public IP
+   - Wait for DNS propagation (can take up to 48 hours)
+
+2. **Set Up SSL Certificate**:
+   ```bash
+   # Get SSL certificate for your domain
+   sudo certbot --nginx -d yourdomain.com
+   # Follow the prompts to configure HTTPS
+   ```
+
+3. **Verify SSL Configuration**:
+   ```bash
+   # Test SSL renewal
+   sudo certbot renew --dry-run
+   ```
+
+### Step 5: Verify Deployment
+
+1. Open a web browser
+2. Go to `https://yourdomain.com` (notice HTTPS)
+3. Verify that:
+   - The site loads securely (green padlock in browser)
+   - You can register and login
+   - The application functions correctly
+   - MongoDB connections work (you can create and retrieve data)
+
+## Automatic Deployments
+
+Now that you've set up GitHub Actions with a self-hosted runner, any time you push changes to the `main` branch of your repository, GitHub Actions will automatically:
+
+1. Build and push new Docker images (build job)
+2. Pull and deploy new containers (deploy job)
+
+To make changes to your application:
+
+1. Make changes to your code locally
+2. Commit the changes:
+   ```bash
+   git add .
+   git commit -m "Initial commit for YaliAero MERN app"
+   ```
+3. Push to GitHub:
+   ```bash
+   git push origin main
+   ```
+4. Wait a few minutes for GitHub Actions to complete both jobs
+
+## Troubleshooting
+
+### Issue: GitHub Actions Runner Not Working
+
+1. Check runner status on EC2:
+   ```bash
+   # Reattach to screen session
+   screen -r github-runner
+   ```
+2. If runner is not running, start it:
+   ```bash
+   cd ~/actions-runner
+   ./run.sh
+   ```
+3. Verify runner is online in GitHub:
+   - Go to repository Settings → Actions → Runners
+   - Check runner status is "Idle" or "Active"
+
+### Issue: Docker Commands Not Working
+
+1. Make sure Docker is installed and running:
+   ```bash
+   sudo systemctl status docker
+   ```
+2. If not running, start it:
+   ```bash
+   sudo systemctl start docker
+   ```
+3. Make sure your user is in the docker group:
+   ```bash
+   groups
+   ```
+   If `docker` is not listed, run:
+   ```bash
+   sudo usermod -aG docker $USER
+   ```
+   Then log out and log back in.
+
+### Issue: Application Not Accessible
+
+1. Check that containers are running:
+   ```bash
+   docker ps
+   ```
+2. Check container logs:
+   ```bash
+   docker logs yaliaero-frontend-container
+   docker logs yaliaero-backend-container
+   ```
+3. Verify Docker network exists:
+   ```bash
+   docker network ls | grep mern-network
+   ```
+4. Verify that the security group allows traffic on ports 80 and 443
+
+### Issue: MongoDB Connection Problems
+
+1. Check MongoDB service status:
+   ```bash
+   sudo systemctl status mongod
+   ```
+2. Verify MongoDB authentication:
+   ```bash
+   # Try connecting with authentication
+   mongosh --username adminUser --password your_secure_password --authenticationDatabase admin
+   ```
+3. Check MongoDB logs:
+   ```bash
+   sudo tail -f /var/log/mongodb/mongod.log
+   ```
+4. Verify MongoDB environment variables in backend container:
+   ```bash
+   docker exec yaliaero-backend-container env | grep MONGO
+   ```
+
+### Issue: SSL Certificate Problems
+
+1. Check certificate status:
+   ```bash
+   sudo certbot certificates
+   ```
+2. Test certificate renewal:
+   ```bash
+   sudo certbot renew --dry-run
+   ```
+3. Verify Nginx SSL configuration:
+   ```bash
+   sudo nginx -t
+   ```
+4. Check SSL certificate paths in container:
+   ```bash
+   docker exec yaliaero-frontend-container ls -l /etc/letsencrypt/live/
+   ```
+
+### Issue: GitHub Actions Build Job Failing
+
+1. Go to your GitHub repository
+2. Click on "Actions" tab
+3. Click on the failed workflow run
+4. Check the build job logs for:
+   - Docker Hub login errors
+   - Build errors
+   - Push errors
+5. Verify your GitHub secrets:
+   - `DOCKER_USERNAME`
+   - `DOCKER_PASSWORD`
+   - `JWT_SECRET`
+   - `MONGO_PASSWORD`
+   - Any other custom environment variables you added
+
+## Conclusion
+
+Congratulations! You've successfully set up the deployment guide for your YaliAero MERN application to AWS EC2 using GitHub Actions. Your application will be accessible on the internet, and any changes you push to your GitHub repository will be automatically deployed.
+
+## Improving the Robustness of Your Deployment
+
+This guide provides a basic setup for deploying your YaliAero MERN application. To further improve the robustness of your deployment, consider the following:
+
+1.  **Infrastructure as Code (IaC)**: Use tools like Terraform or CloudFormation to automate the creation and management of your AWS infrastructure.
+2.  **Monitoring and Logging**: Implement comprehensive monitoring and logging to track the health and performance of your application. Consider using tools like CloudWatch, ELK stack, or Prometheus.
+3.  **Scalability**: Design your application to handle increasing traffic and data. Consider using load balancers, auto-scaling groups, and database replication.
+4.  **Disaster Recovery**: Implement a plan to recover your application in case of a disaster. Consider using backups, replication, and failover mechanisms.
+5.  **Security**: Implement security best practices to protect your application and data. Consider using firewalls, intrusion detection systems, and regular security audits.
+## Backend Service Documentation
+
+The backend service is built using Node.js and Express, with Python dependencies managed for specific functionalities. It handles API requests, user authentication, data processing, and interactions with the MongoDB database.
+
+### Key Technologies:
+*   **Node.js**: Runtime environment for the backend application.
+*   **Express.js**: Web application framework for Node.js.
+*   **Python**: Used for specific backend tasks, with dependencies managed via `requirements.txt`.
+*   **MongoDB**: NoSQL database for storing application data.
+*   **Docker**: Containerization for packaging and running the backend service.
+
+### Docker Configuration:
+
+*   **`server/Dockerfile`**:
+    *   Uses `node:20-alpine` as the base image.
+    *   Installs Python, pip, and necessary build tools.
+    *   Sets up a Python virtual environment (`/opt/venv`).
+    *   Installs Node.js dependencies (`npm install`).
+    *   Installs Python dependencies from `requirements.txt`.
+    *   Copies application code.
+    *   Exposes port `5000` for the backend API.
+    *   Sets `CMD ["npm", "start"]` to run the application.
+
+*   **`docker-compose.yml`**:
+    *   Defines the `backend` service.
+    *   Builds the image from `./server`.
+    *   Sets `restart: always` for continuous availability.
+    *   The backend port `5000` is not directly exposed to the host; it's accessible only within the `mern-network`.
+    *   Configures environment variables for `NODE_ENV`, `MONGO_URI`, `JWT_SECRET`, AWS credentials, email service, etc., primarily sourced from GitHub Secrets.
+    *   Depends on the `mongodb` service to ensure the database is available.
+    *   Connects to the `mern-network`.
+
+### Database Connection:
+
+The backend connects to MongoDB using the `MONGO_URI` environment variable, which is configured in `docker-compose.yml` to point to the `mongodb` service within the Docker network:
+`mongodb://adminUser:${MONGO_PASSWORD}@mongodb:27017/yaliaero_db?authSource=admin`
+This ensures secure and internal communication with the database.
+
+### API Access:
+
+The backend API, running on port 5000, is proxied by Nginx. Requests to `/api/` paths are forwarded to the backend container. This setup enhances security by not exposing the backend port directly to the internet.
