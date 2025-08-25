@@ -334,11 +334,13 @@ Replace "your-username" with your actual GitHub username.
 
 ## Setting Up Dockerfiles and Docker Compose
 
-We will containerize your frontend and backend applications using Docker.
+We will containerize your frontend and backend applications using Docker.  The deployment process utilizes a multi-container architecture managed by `docker-compose.yml`.  The `deploy.yml` file uses `docker-compose up --detach --force-recreate` to ensure that the latest images are always used and old containers are removed.
 
 ### Step 1: Create `server/Dockerfile`
 
-This Dockerfile will build your Node.js backend application, including Python dependencies. Create a file named `Dockerfile` inside the `server/` directory with the following content:
+This Dockerfile builds the Node.js backend application, including Python dependencies managed within a virtual environment.  The virtual environment ensures that Python dependencies are isolated from the system's Python installation.
+
+Create a file named `Dockerfile` inside the `server/` directory with the following content:
 
 ```dockerfile
 # Use an official Node.js runtime as a parent image
@@ -347,18 +349,20 @@ FROM node:20-alpine
 # Set the working directory in the container
 WORKDIR /app
 
-# Install Python and pip
-RUN apk add --no-cache python3 py3-pip
+# Install Python and pip, and build dependencies
+RUN apk add --no-cache python3 py3-pip gcc musl-dev linux-headers fftw-dev build-base python3-dev && \
+    python3 -m venv /opt/venv && \
+    /opt/venv/bin/pip install --no-cache-dir --upgrade pip
+
+# Copy Python requirements and install them
+COPY requirements.txt ./
+RUN /opt/venv/bin/pip install --no-cache-dir --verbose -r requirements.txt
 
 # Copy package.json and package-lock.json to the working directory
 COPY package*.json ./
 
 # Install Node.js dependencies
 RUN npm install
-
-# Copy Python requirements and install them
-COPY requirements.txt ./
-RUN /opt/venv/bin/pip install --no-cache-dir --verbose -r requirements.txt
 
 # Copy the rest of the application code
 COPY . .
@@ -367,13 +371,18 @@ COPY . .
 EXPOSE 5000
 
 # Define the command to run the application
-# Assuming the Node.js server is the primary entry point, and Python scripts are called from Node.js
+# Ensure Python from venv is available in the PATH for any Python scripts called by Node.js
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Define the command to run the application
 CMD ["npm", "start"]
 ```
 
 ### Step 2: Create `client-vite/Dockerfile`
 
-This Dockerfile will build your React frontend application and serve it using Nginx. Create a file named `Dockerfile` inside the `client-vite/` directory with the following content:
+This Dockerfile builds the React frontend application and serves it using Nginx.
+
+Create a file named `Dockerfile` inside the `client-vite/` directory with the following content:
 
 ```dockerfile
 # Use an official Node.js runtime as a parent image
@@ -392,13 +401,18 @@ RUN npm install
 COPY . .
 
 # Build the React application
+# ENV NODE_ENV=development
 RUN VITE_API_BASE_URL=/api npm run build
+# RUN npm run build
 
 # Use Nginx to serve the static files
 FROM nginx:alpine
 
 # Copy the built React app to Nginx's public directory
 COPY --from=build /app/dist /usr/share/nginx/html
+
+# Copy the custom Nginx configuration
+COPY frontend-nginx.conf /etc/nginx/conf.d/default.conf
 
 # Expose port 80
 EXPOSE 80
@@ -409,10 +423,9 @@ CMD ["nginx", "-g", "daemon off;"]
 
 ### Step 3: Create `.dockerignore` files
 
-To optimize your Docker builds and prevent unnecessary files from being copied into your Docker images, create `.dockerignore` files in both your `server/` and `client-vite/` directories.
+To optimize Docker builds, create `.dockerignore` files in both the `server/` and `client-vite/` directories to prevent unnecessary files from being copied into the Docker images.
 
 **`server/.dockerignore`**:
-Create a file named `.dockerignore` inside the `server/` directory with the following content:
 ```
 node_modules
 npm-debug.log
@@ -425,7 +438,6 @@ README.md
 ```
 
 **`client-vite/.dockerignore`**:
-Create a file named `.dockerignore` inside the `client-vite/` directory with the following content:
 ```
 node_modules
 npm-debug.log
@@ -438,9 +450,9 @@ dist
 
 ### Step 4: Create `docker-compose.yml`
 
-This file will define and run your multi-container Docker application. Create a file named `docker-compose.yml` in the root of your project directory (`YaliAero_Website/`).
+This file defines and runs the multi-container Docker application.  It uses environment variable substitution for sensitive information, which should be provided at runtime from the environment where `docker-compose up` is executed (e.g., from GitHub Actions secrets or a local `.env` file).
 
-**Important**: This `docker-compose.yml` uses environment variable substitution (e.g., `${MONGO_PASSWORD}`). This means that the actual values for these variables will be provided at runtime from the environment where `docker-compose up` is executed (e.g., from GitHub Actions secrets or a local `.env` file). **Do not hardcode sensitive information directly into this file.**
+Create a file named `docker-compose.yml` in the root of your project directory (`YaliAero_Website/`).
 
 ```yaml
 version: '3.8'
@@ -450,39 +462,35 @@ services:
     build: ./server
     container_name: yaliaero-backend-container
     restart: always
-    # The backend port is not exposed to the host.
-    # Nginx forwards requests to it over the internal Docker network.
-    # ports:
-    #   - "5000:5000"
     environment:
-      NODE_ENV: ${{ secrets.NODE_ENV }}
-      MONGO_URI: mongodb://adminUser:${{ secrets.MONGO_PASSWORD }}@mongodb:27017/yaliaero_db?authSource=admin
-      JWT_SECRET: ${{ secrets.JWT_SECRET }}
-      PORT: ${{ secrets.PORT }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_REGION: ${{ secrets.AWS_REGION }}
-      S3_BUCKET: ${{ secrets.S3_BUCKET }}
-      VERIFICATION_TOKEN_SECRET: ${{ secrets.VERIFICATION_TOKEN_SECRET }}
-      ASSOCIATE_VERIFICATION_TOKEN_SECRET: ${{ secrets.ASSOCIATE_VERIFICATION_TOKEN_SECRET }}
-      EMAIL_HOST: ${{ secrets.EMAIL_HOST }}
-      EMAIL_PORT: ${{ secrets.EMAIL_PORT }}
-      EMAIL_USER: ${{ secrets.EMAIL_USER }}
-      EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
-      FRONTEND_BASE_URL: ${{ secrets.FRONTEND_BASE_URL }}
+      NODE_ENV: ${NODE_ENV}
+      MONGO_URI: mongodb://adminUser:${MONGO_PASSWORD}@mongodb:27017/yaliaero_db?authSource=admin
+      JWT_SECRET: ${JWT_SECRET}
+      PORT: ${PORT}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION}
+      S3_BUCKET: ${S3_BUCKET}
+      VERIFICATION_TOKEN_SECRET: ${VERIFICATION_TOKEN_SECRET}
+      ASSOCIATE_VERIFICATION_TOKEN_SECRET: ${ASSOCIATE_VERIFICATION_TOKEN_SECRET}
+      EMAIL_HOST: ${EMAIL_HOST}
+      EMAIL_PORT: ${EMAIL_PORT}
+      EMAIL_USER: ${EMAIL_USER}
+      EMAIL_PASS: ${EMAIL_PASS}
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL}
     depends_on:
       - mongodb
     networks:
       - mern-network
 
-  frontend:
+  frontend: 
     build: ./client-vite
     container_name: yaliaero-frontend-container
     restart: always
     ports:
       - "80:80"
     environment:
-      VITE_API_BASE_URL: http://backend:5000 # This points to the backend service within the Docker network
+      VITE_API_BASE_URL: http://backend:5000 
     depends_on:
       - backend
     networks:
@@ -492,13 +500,11 @@ services:
     image: mongo:6.0
     container_name: yaliaero-mongodb
     restart: always
-    # The database port is not exposed to the host.
-    # The backend service connects to it over the internal Docker network.
-    # ports:
-    #   - "27017:27017"
     environment:
       MONGO_INITDB_ROOT_USERNAME: adminUser
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD} # Use environment variable for MongoDB root password
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD} 
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
     volumes:
       - mongodb_data:/data/db
     networks:
@@ -511,6 +517,10 @@ networks:
   mern-network:
     driver: bridge
 ```
+
+Data Persistence for MongoDB with Docker Volumes:
+
+When running MongoDB as a Docker container using `docker-compose.yml`, its data is stored in a Docker volume.  In this setup, a named volume called `mongodb_data` is defined.  This ensures data persistence even if the container is restarted or recreated.
 
 **Data Persistence for MongoDB with Docker Volumes**:
 
