@@ -1,4 +1,4 @@
-# Complete Beginner's Guide to Deploying Your YaliAero MERN Application with AWS ECR
+# Complete Beginner's Guide to Deploying Your YaliAero MERN Application in AWS EC2 with AWS ECR
 
 This guide is designed for absolute beginners who have never used AWS or GitHub Actions before. We'll walk through every single step with detailed instructions to deploy your YaliAero MERN application.
 
@@ -692,29 +692,27 @@ In your GitHub repository, add these secrets. These values will be used by the G
     Value: Your MongoDB password (the one you set during MongoDB setup)
 10. Name: `MONGO_INITDB_ROOT_USERNAME`
     Value: Your MongoDB username(e.g., `adminUser`)
-11. Name: `MONGO_INITDB_ROOT_PASSWORD`
-    Value: Your MongoDB password (the one you set during MongoDB setup)
-12. Name: `ADMIN_EMAIL`
+11. Name: `ADMIN_EMAIL`
     Value: Your admin email that wanted to be admin while creating the ec2 instance
-13. Name: `ADMIN_PASSWORD`
+12. Name: `ADMIN_PASSWORD`
     Value: Your admin password that your organization wanted to use
-14. Name: `S3_BUCKET`
+13. Name: `S3_BUCKET`
     Value: The name of your S3 bucket
-15. Name: `VERIFICATION_TOKEN_SECRET`
+14. Name: `VERIFICATION_TOKEN_SECRET`
     Value: A secure random string for verification tokens
-16. Name: `ASSOCIATE_VERIFICATION_TOKEN_SECRET`
+15. Name: `ASSOCIATE_VERIFICATION_TOKEN_SECRET`
     Value: A secure random string for associate verification tokens
-17. Name: `EMAIL_HOST`
+16. Name: `EMAIL_HOST`
     Value: `smtp.gmail.com`
-18. Name: `EMAIL_PORT`
+17. Name: `EMAIL_PORT`
     Value: `587`
-19. Name: `EMAIL_USER`
+18. Name: `EMAIL_USER`
     Value: Your email address for sending emails
-20. Name: `EMAIL_PASS`
+19. Name: `EMAIL_PASS`
     Value: Your email password or app-specific password
-21. Name: `FRONTEND_BASE_URL`
+20. Name: `FRONTEND_BASE_URL`
     Value: The public URL of your deployed frontend (e.g., `https://yourdomain.com`)
-22. Name: `NODE_ENV`
+21. Name: `NODE_ENV`
     Value: `production`
 
 **Note on Email Service Ports**: You do not need to open port 587 (or any other email port) in your EC2 security group's **inbound** rules. Your application makes an **outbound** connection to the email server, and all outbound traffic is allowed by default. This setup is secure and correct.
