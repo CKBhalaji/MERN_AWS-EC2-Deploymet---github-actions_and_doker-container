@@ -167,6 +167,7 @@ sudo usermod -aG docker ubuntu
 exit
 ```
 
+
 Reconnect to your instance using the same method as before, then continue:
 
 ```bash
@@ -176,6 +177,9 @@ docker --version
 # Verify Docker Compose is working
 docker compose version
 
+# Authenticate with Docker Hub (Crucial for private repositories)
+docker login
+
 # Install Git
 sudo apt install -y git
 
@@ -183,6 +187,24 @@ sudo apt install -y git
 sudo apt install -y certbot python3-certbot-nginx
 
 ```
+### (Already Done Explained)why we have to login docker in ec2 instance
+
+After installing Docker on your EC2 instance, and before starting the GitHub Actions runner, you must authenticate with Docker Hub.
+
+Here are the steps you should add:
+
+1.  **SSH into your EC2 instance.**
+2.  **Run the `docker login` command.** You will be prompted to enter your Docker Hub username and password.
+
+```bash
+docker login
+```
+
+3.  **Enter your credentials** when prompted.
+
+After successfully logging in, Docker stores your credentials in a configuration file on the EC2 instance. The GitHub Actions self-hosted runner, running as the `ubuntu` user, will use these stored credentials to authenticate with Docker Hub when it executes the `docker pull` commands in your workflow.
+
+This one-time manual step on your EC2 instance is all you need to do to allow the self-hosted runner to access your private repositories. Your GitHub Actions workflow is already set up to handle the rest of the process, including the build and push, which uses secrets for authentication.
 
 ## Nginx Configuration
 
