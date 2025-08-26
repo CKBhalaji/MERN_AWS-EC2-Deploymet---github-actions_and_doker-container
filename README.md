@@ -591,7 +591,7 @@ After creation, note down the repository URI for both repositories. It will be i
 
 You need an IAM (Identity and Access Management) user with specific permissions to allow GitHub Actions to securely interact with your AWS account. This user will be granted the necessary access to push and pull images from ECR.
 
-### Step 1: Create an IAM User
+### Step 1: Create an IAM User (or) append to the alredy using IAM
 
 1.  In the AWS Management Console, use the search bar to find and navigate to the **IAM** service.
 2.  In the left navigation pane, click on **Users**, then click **Add users**.
@@ -602,6 +602,16 @@ You need an IAM (Identity and Access Management) user with specific permissions 
 7.  In the search bar, type `ECR`.
 8.  Select the check box next to **`AmazonEC2ContainerRegistryPowerUser`**. This managed policy provides the necessary permissions for building and deploying images to ECR.
 9.  Click **"Next"** and then **"Create user"**.
+
+(or)
+
+1.  **Navigate to IAM**: Go to the AWS Management Console, search for **IAM**, and select it.
+2.  **Find the User**: In the left-hand navigation pane, click on Users, and then click on the IAM user you want to modify.
+3.  **Attach a New Policy**: On the user's details page, navigate to the **Permissions** tab and click on **Add permissions**.
+4.  **Attach Policies Directly**: Choose **Attach policies directly**.
+5.  **Search and Attach**: In the search bar, type `ECR`. Select the checkbox next to the managed policy named **`AmazonEC2ContainerRegistryPowerUser`**.
+6.  **Review and Save**: Click **Next**, and then **Add permissions** to save the changes.
+Once you have completed these steps, your IAM user will have the necessary permissions to interact with both S3 and ECR.
 
 ### Step 2: Get the Access Keys for the IAM User
 
@@ -680,23 +690,31 @@ In your GitHub repository, add these secrets. These values will be used by the G
     Value: A secure random string for verification tokens (e.g., generate one at [https://randomkeygen.com/](https://randomkeygen.com/))
 9.  Name: `MONGO_PASSWORD`
     Value: Your MongoDB password (the one you set during MongoDB setup)
-10. Name: `S3_BUCKET`
+10. Name: `MONGO_INITDB_ROOT_USERNAME`
+    Value: Your MongoDB username(e.g., `adminUser`)
+11. Name: `MONGO_INITDB_ROOT_PASSWORD`
+    Value: Your MongoDB password (the one you set during MongoDB setup)
+12. Name: `ADMIN_EMAIL`
+    Value: Your admin email that wanted to be admin while creating the ec2 instance
+13. Name: `ADMIN_PASSWORD`
+    Value: Your admin password that your organization wanted to use
+14. Name: `S3_BUCKET`
     Value: The name of your S3 bucket
-11. Name: `VERIFICATION_TOKEN_SECRET`
+15. Name: `VERIFICATION_TOKEN_SECRET`
     Value: A secure random string for verification tokens
-12. Name: `ASSOCIATE_VERIFICATION_TOKEN_SECRET`
+16. Name: `ASSOCIATE_VERIFICATION_TOKEN_SECRET`
     Value: A secure random string for associate verification tokens
-13. Name: `EMAIL_HOST`
+17. Name: `EMAIL_HOST`
     Value: `smtp.gmail.com`
-14. Name: `EMAIL_PORT`
+18. Name: `EMAIL_PORT`
     Value: `587`
-15. Name: `EMAIL_USER`
+19. Name: `EMAIL_USER`
     Value: Your email address for sending emails
-16. Name: `EMAIL_PASS`
+20. Name: `EMAIL_PASS`
     Value: Your email password or app-specific password
-17. Name: `FRONTEND_BASE_URL`
+21. Name: `FRONTEND_BASE_URL`
     Value: The public URL of your deployed frontend (e.g., `https://yourdomain.com`)
-18. Name: `NODE_ENV`
+22. Name: `NODE_ENV`
     Value: `production`
 
 **Note on Email Service Ports**: You do not need to open port 587 (or any other email port) in your EC2 security group's **inbound** rules. Your application makes an **outbound** connection to the email server, and all outbound traffic is allowed by default. This setup is secure and correct.
