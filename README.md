@@ -52,6 +52,45 @@ This guide is designed for absolute beginners who have never used AWS or GitHub 
 
 ---
 
+## Using AWS SES for Email
+
+Using AWS for email is a multi-step process that ensures your application is secure and your emails have high deliverability. Here is a complete, step-by-step guide to get everything configured in one go.
+
+### Step 1: Verify Your Email Address 📧
+  1. This is the fastest and easiest way to get started.
+  2. Log in to the AWS Management Console and navigate to the SES Dashboard.
+  3. In the left menu, under Configuration, click Verified identities.
+  4. Click Create identity. For Identity type, choose Email address.
+  5. Enter the exact email address you want to use (e.g., info@yourdomain.com).
+  6. AWS will send a verification email to that address. You must open the email and click the link to complete the    verification. The status in your dashboard will change to "Verified" when done.
+
+### Step 2: Get Your SMTP Credentials 🔑
+  1. Once your email is verified, you need to generate a specific set of credentials for your application. These are different from your AWS console login or IAM user keys.
+  2. In the SES Dashboard, click SMTP Settings in the left menu.
+  3. Click Create My SMTP Credentials. This will take you to the IAM console.
+  4. An IAM user will be created. You can leave the name as the default or change it.
+  5. After the user is created, AWS will display your unique SMTP username and SMTP password. Copy and save these credentials immediately! You will not be able to view the password again.
+
+### Step 3: Request Production Access 🚀
+  1. New AWS accounts are in a sandbox environment, which means you can only send emails to verified addresses. For a production application, you must request to move out of the sandbox.
+  2. In the SES Dashboard, go to your Account dashboard.
+  3. Click Request production access and fill out the form. You will need to explain what your application does and the types of emails you'll be sending.
+  4. Submit the request. AWS typically reviews these within 24-48 hours. Once approved, you can send emails to any recipient.
+
+### Step 4: Configure Your Application ⚙️
+  Now, you can use the credentials and host information you've gathered to fill in your application's environment variables.
+  
+  ```bash
+  EMAIL_HOST = email-smtp.[your-region].amazonaws.com (e.g., email-smtp.us-east-1.amazonaws.com)
+
+  EMAIL_PORT = 587
+
+  EMAIL_USER = Your unique SMTP username from Step 2.
+
+  EMAIL_PASS = Your unique SMTP password from Step 2.
+  ```
+---
+
 ### Creating an EC2 Instance
 
 ### Step 1: Navigate to EC2 Service
@@ -366,18 +405,19 @@ We will containerize your frontend and backend applications using Docker. The de
 
 ### Step 1: Create `server/Dockerfile`
 
-This Dockerfile builds the Node.js backend application, including Python dependencies managed within a virtual environment. The virtual environment ensures that Python dependencies are isolated from the system's Python installation.
+This Dockerfile builds the Node.js backend application using a multi-stage build process for optimized image size.  The build process includes creating a Python virtual environment (`/opt/venv`) in the builder stage to isolate Python dependencies. These dependencies are then copied into the production stage, ensuring a clean and efficient runtime environment.  The `PATH` environment variable is set to include the virtual environment's `bin` directory, allowing Node.js to access Python executables within the virtual environment.
 
 Create a file named `Dockerfile` inside the `server/` directory with the following content:
 
 ```dockerfile
-# Use an official Node.js runtime as a parent image
-FROM node:20-alpine
+# --- Build Stage ---
+FROM node:20-alpine as builder
 
 # Set the working directory in the container
 WORKDIR /app
 
 # Install Python and pip, and build dependencies
+# Use a single RUN command to minimize layers and clean up apk cache
 RUN apk add --no-cache python3 py3-pip gcc musl-dev linux-headers fftw-dev build-base python3-dev && \
     python3 -m venv /opt/venv && \
     /opt/venv/bin/pip install --no-cache-dir --upgrade pip
@@ -395,10 +435,37 @@ RUN npm install
 # Copy the rest of the application code
 COPY . .
 
+# --- Production Stage ---
+FROM node:20-alpine
+
+# Set the working directory in the container
+WORKDIR /app
+
+# Copy only necessary files from the builder stage
+COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package*.json ./
+COPY --from=builder /app/server.js ./server.js
+COPY --from=builder /app/app.js ./app.js
+COPY --from=builder /app/config_default.ini ./config_default.ini
+COPY --from=builder /app/config_user.ini ./config_user.ini
+COPY --from=builder /app/faqs_data.json ./faqs_data.json
+COPY --from=builder /app/requirements.txt ./requirements.txt
+COPY --from=builder /app/middleware ./middleware
+COPY --from=builder /app/models ./models
+COPY --from=builder /app/plot_app ./plot_app
+COPY --from=builder /app/routes ./routes
+COPY --from=builder /app/scripts ./scripts
+COPY --from=builder /app/services ./services
+COPY --from=builder /app/data ./data
+COPY --from=builder /app/.dockerignore ./.dockerignore
+COPY --from=builder /app/.gitignore ./.gitignore
+COPY --from=builder /app/README.md ./README.md
+
+
 # Expose the port the app runs on
 EXPOSE 5000
 
-# Define the command to run the application
 # Ensure Python from venv is available in the PATH for any Python scripts called by Node.js
 ENV PATH="/opt/venv/bin:$PATH"
 
@@ -490,6 +557,7 @@ version: '3.8'
 services:
   backend:
     image: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}[.amazonaws.com/$](https://.amazonaws.com/$){{ secrets.ECR_REPOSITORY }}-backend:latest
+    # build: ./server/  # Instructs Docker to build from the local server directory if run on local environment
     container_name: yaliaero-backend-container
     restart: always
     environment:
@@ -515,6 +583,7 @@ services:
 
   frontend:
     image: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}[.amazonaws.com/$](https://.amazonaws.com/$){{ secrets.ECR_REPOSITORY }}-frontend:latest
+    # build: ./client-vite/ # Instructs Docker to build from the local server directory if run on local environment
     container_name: yaliaero-frontend-container
     restart: always
     ports:
@@ -613,6 +682,7 @@ You need an IAM (Identity and Access Management) user with specific permissions 
 6.  **Review and Save**: Click **Next**, and then **Add permissions** to save the changes.
 Once you have completed these steps, your IAM user will have the necessary permissions to interact with both S3 and ECR.
 
+
 ### Step 2: Get the Access Keys for the IAM User
 
 1.  After creating the user, you'll see a success page. Click on the user name you just created (e.g., `github-actions-user`).
@@ -649,23 +719,23 @@ Once you have completed these steps, your IAM user will have the necessary permi
 8.  Keep the runner service running automatically by configuring it as a systemd service. This ensures the runner starts on boot and restarts if it crashes.
     a. Navigate to the runner directory:
     ```bash
-    cd ~/actions-runner
+      cd ~/actions-runner
     ```
     b. Install the service:
     ```bash
-    sudo ./svc.sh install
+      sudo ./svc.sh install
     ```
     c. Start the service:
     ```bash
-    sudo ./svc.sh start
+      sudo ./svc.sh start
     ```
     d. Check the status:
     ```bash
-    sudo ./svc.sh status
+      sudo ./svc.sh status
     ```
     If you encounter issues with `needrestart` interfering, you may need to configure it to ignore the runner service by running:
     ```bash
-    echo '$nrconf{override_rc}{qr(^actions\.runner\..+\.service$)} = 0;' | sudo tee /etc/needrestart/conf.d/actions_runner_services.conf
+      echo '$nrconf{override_rc}{qr(^actions\.runner\..+\.service$)} = 0;' | sudo tee /etc/needrestart/conf.d/actions_runner_services.conf
     ```
 
 ### Step 2: Add GitHub Secrets
@@ -692,27 +762,29 @@ In your GitHub repository, add these secrets. These values will be used by the G
     Value: Your MongoDB password (the one you set during MongoDB setup)
 10. Name: `MONGO_INITDB_ROOT_USERNAME`
     Value: Your MongoDB username(e.g., `adminUser`)
-11. Name: `ADMIN_EMAIL`
+11. Name: `MONGO_INITDB_ROOT_PASSWORD`
+    Value: Your MongoDB password (the one you set during MongoDB setup)
+12. Name: `ADMIN_EMAIL`
     Value: Your admin email that wanted to be admin while creating the ec2 instance
-12. Name: `ADMIN_PASSWORD`
+13. Name: `ADMIN_PASSWORD`
     Value: Your admin password that your organization wanted to use
-13. Name: `S3_BUCKET`
+14. Name: `S3_BUCKET`
     Value: The name of your S3 bucket
-14. Name: `VERIFICATION_TOKEN_SECRET`
+15. Name: `VERIFICATION_TOKEN_SECRET`
     Value: A secure random string for verification tokens
-15. Name: `ASSOCIATE_VERIFICATION_TOKEN_SECRET`
+16. Name: `ASSOCIATE_VERIFICATION_TOKEN_SECRET`
     Value: A secure random string for associate verification tokens
-16. Name: `EMAIL_HOST`
+17. Name: `EMAIL_HOST`
     Value: `smtp.gmail.com`
-17. Name: `EMAIL_PORT`
+18. Name: `EMAIL_PORT`
     Value: `587`
-18. Name: `EMAIL_USER`
+19. Name: `EMAIL_USER`
     Value: Your email address for sending emails
-19. Name: `EMAIL_PASS`
+20. Name: `EMAIL_PASS`
     Value: Your email password or app-specific password
-20. Name: `FRONTEND_BASE_URL`
+21. Name: `FRONTEND_BASE_URL`
     Value: The public URL of your deployed frontend (e.g., `https://yourdomain.com`)
-21. Name: `NODE_ENV`
+22. Name: `NODE_ENV`
     Value: `production`
 
 **Note on Email Service Ports**: You do not need to open port 587 (or any other email port) in your EC2 security group's **inbound** rules. Your application makes an **outbound** connection to the email server, and all outbound traffic is allowed by default. This setup is secure and correct.
