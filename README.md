@@ -1,3 +1,23 @@
+## Deployment Steps Summary
+
+To ensure a smooth deployment, follow these steps in the given order:
+
+1.  **Set up an AWS Account**: Create an AWS account and sign in to the AWS Console.
+2.  **Configure AWS SES for Email**: Verify your email address, get SMTP credentials, request production access, and configure your application with the credentials.
+3.  **Create an EC2 Instance**: Launch an EC2 instance, choose an Ubuntu AMI, select an instance type, create a key pair, configure network settings, configure storage, and note your instance details.
+4.  **Connect to Your EC2 Instance**: Connect to your EC2 instance using SSH (different instructions for Windows and Mac/Linux users).
+5.  **Set Up Your EC2 Instance**: Update the system, install Docker and Docker Compose, start Docker, verify Docker is working, install Git, and install Certbot for SSL.
+6.  **Nginx Configuration**: Configure Nginx on your EC2 instance using the `yaliaero.conf` file. After deployment, replace `localhost` with your actual domain name and ensure the SSL certificates are located in the specified paths.
+7.  **Set Up GitHub Repository**: Create a GitHub account (if you don't have one), create a new repository, and push your code to GitHub.
+8.  **Set Up Dockerfiles and Docker Compose**: Create `server/Dockerfile`, `client-vite/Dockerfile`, `.dockerignore` files, and `docker-compose.yml`.
+9.  **Set up the Amazon DocumentDB (with MongoDB compatibility) Database**: Create a DocumentDB Cluster, Configure VPC Security Groups, Obtain the Connection String and Environment Variables, Import the TLS Certificate.
+10. **Create and Configuring an ECR Repository**: Create two separate repositories (backend and frontend) and retrieve the repository URIs.
+11. **Create and Configuring an IAM User**: Create an IAM user with the `AmazonEC2ContainerRegistryPowerUser`, `AmazonEC2ContainerRegistryFullAccess`, `AmazonEC2FullAccess` and `AmazonS3FullAccess` policies and get the access keys for the IAM user. Also, get your AWS Account ID and ECR Repository Name.
+12. **Setting Up GitHub Actions**: Set up GitHub Actions Runner on EC2 and add GitHub Secrets.
+13. **Deploying Your Application**: Set Up Docker Network, Configure GitHub Actions Runner, Understanding Container Management, Configure Domain and SSL, and Verify Deployment.
+
+---
+
 # Complete Beginner's Guide to Deploying Your YaliAero MERN Application in AWS EC2 with AWS ECR
 
 This guide is designed for absolute beginners who have never used AWS or GitHub Actions before. We'll walk through every single step with detailed instructions to deploy your YaliAero MERN application.
@@ -52,45 +72,48 @@ This guide is designed for absolute beginners who have never used AWS or GitHub 
 
 ---
 
+## Using AWS SES for Email
 
-### Setting Up AWS SES
+Using AWS for email is a multi-step process that ensures your application is secure and your emails have high deliverability. Here is a complete, step-by-step guide to get everything configured in one go.
 
-Amazon Simple Email Service (SES) is a powerful, scalable, and cost-effective service for sending professional emails. The following is a complete step-by-step guide to setting it up for your application.
+### Step 1: Verify Your Email Address 📧
 
-### Step 1: Verify Your Email Address or Domain 📧
-  
-  1. Before you can send emails, you must prove to AWS that you own the email address or domain you will be sending from. The easiest way to get started is by verifying an individual email address.
-  2. Log in to the AWS Management Console and search for "SES."
-  3. In the left navigation pane, under Configuration, click Verified identities.
-  4. Click Create identity and for Identity type, choose Email address.
-  5. Enter the exact email address you want to use (e.g., info@yourdomain.com).
-  6. AWS will send a verification email to that address. You must open the email and click the link to complete the verification process. The status in your dashboard will change to "Verified" when complete.
+1. This is the fastest and easiest way to get started.
+2. Log in to the AWS Management Console and navigate to the SES Dashboard.
+3. In the left menu, under Configuration, click Verified identities.
+4. Click Create identity. For Identity type, choose Email address.
+5. Enter the exact email address you want to use (e.g., info@yourdomain.com).
+6. AWS will send a verification email to that address. You must open the email and click the link to complete the verification. The status in your dashboard will change to "Verified" when done.
 
 ### Step 2: Get Your SMTP Credentials 🔑
 
-  1. Your application needs specific credentials to authenticate and send emails, which are different from your AWS console login or IAM user keys.
-  2. In the SES Dashboard, click SMTP Settings in the left menu.
-  3. Click Create My SMTP Credentials. This will open the IAM console.
-  4. An IAM user will be created for you, which you can name or leave as the default.
-  5. After the user is created, AWS will display your unique SMTP username and SMTP password. Copy and save these credentials immediately, as the password will not be shown again. You will use these for your EMAIL_USER and EMAIL_PASS environment variables.
+1. Once your email is verified, you need to generate a specific set of credentials for your application. These are different from your AWS console login or IAM user keys.
+2. In the SES Dashboard, click SMTP Settings in the left menu.
+3. Click Create My SMTP Credentials. This will take you to the IAM console.
+4. An IAM user will be created. You can leave the name as the default or change it.
+5. After the user is created, AWS will display your unique SMTP username and SMTP password. Copy and save these credentials immediately! You will not be able to view the password again.
 
 ### Step 3: Request Production Access 🚀
 
-  1. New AWS accounts are initially in a "sandbox" environment, which limits you to sending emails only to verified addresses. To send emails to any recipient, you must request production access.
-  2. In the SES Dashboard, go to your Account dashboard.
-  3. Click Request production access and fill out the form. You will need to explain what your application does and the types of emails you will be sending.
-  4. Submit the request. AWS typically reviews these within 24-48 hours. Once approved, you can send emails to any recipient.
+1. New AWS accounts are in a sandbox environment, which means you can only send emails to verified addresses. For a production application, you must request to move out of the sandbox.
+2. In the SES Dashboard, go to your Account dashboard.
+3. Click Request production access and fill out the form. You will need to explain what your application does and the types of emails you'll be sending.
+4. Submit the request. AWS typically reviews these within 24-48 hours. Once approved, you can send emails to any recipient.
 
 ### Step 4: Configure Your Application ⚙️
 
-  After obtaining your credentials, you will use them to configure your application's environment variables. The host will depend on your AWS region, for example, email-smtp.us-east-1.amazonaws.com.
+Now, you can use the credentials and host information you've gathered to fill in your application's environment variables.
 
 ```bash
-EMAIL_HOST = email-smtp.[your-region].amazonaws.com
+EMAIL_HOST = email-smtp.[your-region].amazonaws.com (e.g., email-smtp.us-east-1.amazonaws.com)
+
 EMAIL_PORT = 587
+
 EMAIL_USER = Your unique SMTP username from Step 2.
+
 EMAIL_PASS = Your unique SMTP password from Step 2.
 ```
+
 ---
 
 ### Creating an EC2 Instance
@@ -415,17 +438,16 @@ Replace "your-username" with your actual GitHub username.
 
 ### Setting Up Dockerfiles and Docker Compose
 
-We will containerize your frontend and backend applications using Docker. The deployment process utilizes a multi-container architecture managed by `docker-compose.yml`. The `deploy.yml` file uses `docker-compose up --detach --force-recreate` to ensure that the latest images are always used and old containers are removed.
+We will containerize your frontend and backend applications using Docker. The deployment process utilizes a multi-container architecture managed by `docker-compose.yml`. The `deploy.yml` file uses `docker-compose` to manage the deployment.
 
 ### Step 1: Create `server/Dockerfile`
 
-This Dockerfile builds the Node.js backend application using a multi-stage build process for optimized image size. The build process includes creating a Python virtual environment (`/opt/venv`) in the builder stage to isolate Python dependencies. These dependencies are then copied into the production stage, ensuring a clean and efficient runtime environment. The `PATH` environment variable is set to include the virtual environment's `bin` directory, allowing Node.js to access Python executables within the virtual environment.
+This Dockerfile builds the Node.js backend application using a multi-stage build process for optimized image size and includes Python dependencies.
 
 Create a file named `Dockerfile` inside the `server/` directory with the following content:
 
 ```dockerfile
-# --- Build Stage ---
-FROM node:20-alpine as builder
+FROM node:20-alpine
 
 # Set the working directory in the container
 WORKDIR /app
@@ -449,34 +471,6 @@ RUN npm install
 # Copy the rest of the application code
 COPY . .
 
-# --- Production Stage ---
-FROM node:20-alpine
-
-# Set the working directory in the container
-WORKDIR /app
-
-# Copy only necessary files from the builder stage
-COPY --from=builder /opt/venv /opt/venv
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package*.json ./
-COPY --from=builder /app/server.js ./server.js
-COPY --from=builder /app/app.js ./app.js
-COPY --from=builder /app/config_default.ini ./config_default.ini
-COPY --from=builder /app/config_user.ini ./config_user.ini
-COPY --from=builder /app/faqs_data.json ./faqs_data.json
-COPY --from=builder /app/requirements.txt ./requirements.txt
-COPY --from=builder /app/middleware ./middleware
-COPY --from=builder /app/models ./models
-COPY --from=builder /app/plot_app ./plot_app
-COPY --from=builder /app/routes ./routes
-COPY --from=builder /app/scripts ./scripts
-COPY --from=builder /app/services ./services
-COPY --from=builder /app/data ./data
-COPY --from=builder /app/.dockerignore ./.dockerignore
-COPY --from=builder /app/.gitignore ./.gitignore
-COPY --from=builder /app/README.md ./README.md
-
-
 # Expose the port the app runs on
 EXPOSE 5000
 
@@ -494,8 +488,7 @@ This Dockerfile builds the React frontend application and serves it using Nginx.
 Create a file named `Dockerfile` inside the `client-vite/` directory with the following content:
 
 ```dockerfile
-# Use an official Node.js runtime as a parent image
-FROM node:20-alpine as build
+FROM node:20-alpine AS build
 
 # Set the working directory in the container
 WORKDIR /app
@@ -511,8 +504,7 @@ COPY . .
 
 # Build the React application
 # ENV NODE_ENV=development
-RUN VITE_API_BASE_URL=/api npm run build
-# RUN npm run build
+RUN VITE_API_BASE_URL=/api npm run build --force
 
 # Use Nginx to serve the static files
 FROM nginx:alpine
@@ -538,13 +530,6 @@ To optimize Docker builds, create `.dockerignore` files in both the `server/` an
 
 ```
 node_modules
-npm-debug.log
-.env
-data/logs.sqlite
-data/cache/
-.git
-.gitignore
-README.md
 ```
 
 **`client-vite/.dockerignore`**:
@@ -561,53 +546,57 @@ dist
 
 ### Step 4: Create docker-compose.yml
 
-This file defines and runs the multi-container Docker application. It uses environment variable substitution for sensitive information, which should be provided at runtime from the environment where docker-compose up is executed (e.g., from GitHub Actions secrets or a local .env file).
+This file defines and runs the multi-container Docker application. It uses environment variable substitution for sensitive information, which should be provided at runtime from the environment where `docker-compose` is executed (e.g., from GitHub Actions secrets or a local .env file).
 
-Create a file named docker-compose.yml in the root of your project directory (YaliAero_Website/).
+Create a file named `docker-compose.yml` in the root of your project directory (`YaliAero_Website/`).
 
-```YAML
-  version: '3.8'
-  services:
-    backend:
-      image: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}-backend:latest
-      container_name: yaliaero-backend-container
-      restart: always
-      environment:
-        NODE_ENV: ${NODE_ENV}
-        MONGO_URI: ${MONGO_URI}
-        JWT_SECRET: ${JWT_SECRET}
-        PORT: ${PORT}
-        AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
-        AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
-        AWS_REGION: ${AWS_REGION}
-        S3_BUCKET: ${S3_BUCKET}
-        VERIFICATION_TOKEN_SECRET: ${VERIFICATION_TOKEN_SECRET}
-        ASSOCIATE_VERIFICATION_TOKEN_SECRET: ${ASSOCIATE_VERIFICATION_TOKEN_SECRET}
-        EMAIL_HOST: ${EMAIL_HOST}
-        EMAIL_PORT: ${EMAIL_PORT}
-        EMAIL_USER: ${EMAIL_USER}
-        EMAIL_PASS: ${EMAIL_PASS}
-        FRONTEND_BASE_URL: ${FRONTEND_BASE_URL}
-      networks:
-        - mern-network
-    frontend:
-      image: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}-frontend:latest
-      container_name: yaliaero-frontend-container
-      restart: always
-      ports:
-        - "80:80"
-      environment:
-        VITE_API_BASE_URL: http://backend:5000
-      depends_on:
-        - backend
-      networks:
-        - mern-network
-  networks:
-    mern-network:
-      driver: bridge
+```yaml
+version: '3.8'
+services:
+  backend:
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}_backend:latest
+    container_name: yaliaero-backend-container
+    restart: always
+    environment:
+      NODE_ENV: ${NODE_ENV}
+      MONGO_URI: ${MONGO_URI}
+      JWT_SECRET: ${JWT_SECRET}
+      PORT: ${PORT}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION}
+      S3_BUCKET: ${S3_BUCKET}
+      VERIFICATION_TOKEN_SECRET: ${VERIFICATION_TOKEN_SECRET}
+      ASSOCIATE_VERIFICATION_TOKEN_SECRET: ${ASSOCIATE_VERIFICATION_TOKEN_SECRET}
+      EMAIL_HOST: ${EMAIL_HOST}
+      EMAIL_PORT: ${EMAIL_PORT}
+      EMAIL_USER: ${EMAIL_USER}
+      EMAIL_PASS: ${EMAIL_PASS}
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL}
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+    networks:
+      - mern-network
+
+  frontend:
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}_frontend:latest
+    container_name: yaliaero-frontend-container
+    restart: always
+    ports:
+      - "80:80"
+    environment:
+      VITE_API_BASE_URL: http://backend:5000
+    depends_on:
+      - backend
+    networks:
+      - mern-network
+
+networks:
+  mern-network:
+    driver: bridge
 ```
 
-The docker-compose.yml has been updated to remove the mongodb service and the volume, as you will be connecting to a DocumentDB instance running outside of this Docker setup. The depends_on: - mongodb line has also been removed. The MONGO_URI variable is now a general environment variable.
+The `docker-compose.yml` has been updated to remove the `mongodb` service and the volume, as you will be connecting to a DocumentDB instance running outside of this Docker setup. The `MONGO_URI` variable is now a general environment variable.
 
 ## Setting up the Amazon DocumentDB (with MongoDB compatibility) Database
 
@@ -667,7 +656,7 @@ services:
     restart: always
     environment:
       NODE_ENV: ${NODE_ENV}
-      MONGO_URI: ${MONGO_URI}
+      MONGO_URI: ${{ MONGO_URI }}
       ...
 ```
 
@@ -869,7 +858,7 @@ name: Deploy YaliAero MERN Application to AWS ECR
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
 
 jobs:
   build:
@@ -890,15 +879,15 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build and Tag Backend Image
-        run: docker build -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}[.amazonaws.com/$](https://.amazonaws.com/$){{ secrets.ECR_REPOSITORY }}-backend:latest ./server
+        run: docker build -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}_backend:latest ./server
 
       - name: Build and Tag Frontend Image
-        run: docker build -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}[.amazonaws.com/$](https://.amazonaws.com/$){{ secrets.ECR_REPOSITORY }}-frontend:latest ./client-vite
+        run: docker build -t ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}_frontend:latest ./client-vite
 
       - name: Push Images to ECR
         run: |
-          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}[.amazonaws.com/$](https://.amazonaws.com/$){{ secrets.ECR_REPOSITORY }}-backend:latest
-          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}[.amazonaws.com/$](https://.amazonaws.com/$){{ secrets.ECR_REPOSITORY }}-frontend:latest
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}_backend:latest
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}_frontend:latest
 
   deploy:
     needs: build
@@ -910,44 +899,68 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
-
+          
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
-
+      
       - name: Checkout Source (for docker-compose.yml)
         uses: actions/checkout@v4
 
-      - name: Pull Images from ECR
+      - name: Add User to Docker Group
+        run: sudo usermod -aG docker $USER
+
+      - name: Login to ECR with Docker
         run: |
-          docker pull ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}[.amazonaws.com/$](https://.amazonaws.com/$){{ secrets.ECR_REPOSITORY }}-backend:latest
-          docker pull ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}[.amazonaws.com/$](https://.amazonaws.com/$){{ secrets.ECR_REPOSITORY }}-frontend:latest
+          aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | sudo docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
+
+      - name: Install Docker Compose
+        run: sudo apt-get update && sudo apt-get install -y docker-compose -o Acquire::ForceIPv4=true
+
+      # inside your deploy job that runs on the self-hosted runner
+      - name: Write .env for app
+        run: |
+          cat > ./docker-compose.env <<'EOF'
+          AWS_ACCOUNT_ID=${{ secrets.AWS_ACCOUNT_ID }}
+          AWS_REGION=${{ secrets.AWS_REGION }}
+          ECR_REPOSITORY=${{ secrets.ECR_REPOSITORY }}
+          MONGO_URI=${{ secrets.MONGO_URI }}
+          JWT_SECRET=${{ secrets.JWT_SECRET }}
+          PORT=${{ secrets.PORT }}
+          S3_BUCKET=${{ secrets.S3_BUCKET }}
+          VERIFICATION_TOKEN_SECRET=${{ secrets.VERIFICATION_TOKEN_SECRET }}
+          ASSOCIATE_VERIFICATION_TOKEN_SECRET=${{ secrets.ASSOCIATE_VERIFICATION_TOKEN_SECRET }}
+          EMAIL_HOST=${{ secrets.EMAIL_HOST }}
+          EMAIL_PORT=${{ secrets.EMAIL_PORT }}
+          EMAIL_USER=${{ secrets.EMAIL_USER }}
+          EMAIL_PASS=${{ secrets.EMAIL_PASS }}
+          FRONTEND_BASE_URL=${{ secrets.FRONTEND_BASE_URL }}
+          NODE_ENV=${{ secrets.NODE_ENV }}
+          ADMIN_EMAIL=${{ secrets.ADMIN_EMAIL }}
+          ADMIN_PASSWORD=${{ secrets.ADMIN_PASSWORD }}
+          AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          EOF
+          chmod 600 ./docker-compose.env
 
       - name: Stop and Remove Old Containers
         run: |
-          docker-compose -f docker-compose.yml down || true
+          sudo docker-compose --env-file ./docker-compose.env -f docker-compose.yml down --volumes --remove-orphans || true
 
-      - name: Run Docker Compose
+      - name: Stop and remove the old images from EC2 instance
+        run: docker images -f "dangling=true" -q | xargs -r docker rmi -f
+
+      - name: Check Docker Container Status
+        run: sudo docker ps -a
+
+      - name: Forcefully free up port 80
+        run: sudo fuser -k 80/tcp || true
+
+      # then use this env file with docker-compose
+      - name: Start containers
         run: |
-          docker-compose -f docker-compose.yml up -d
-        env:
-          JWT_SECRET: ${{ secrets.JWT_SECRET }}
-          PORT: 5000
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_REGION: ${{ secrets.AWS_REGION }}
-          S3_BUCKET: ${{ secrets.S3_BUCKET }}
-          VERIFICATION_TOKEN_SECRET: ${{ secrets.VERIFICATION_TOKEN_SECRET }}
-          ASSOCIATE_VERIFICATION_TOKEN_SECRET: ${{ secrets.ASSOCIATE_VERIFICATION_TOKEN_SECRET }}
-          MONGO_URI: ${{ secrets.MONGO_URI }}
-          EMAIL_HOST: ${{ secrets.EMAIL_HOST }}
-          EMAIL_PORT: ${{ secrets.EMAIL_PORT }}
-          EMAIL_USER: ${{ secrets.EMAIL_USER }}
-          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
-          ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL}}
-          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD}}
-          FRONTEND_BASE_URL: ${{ secrets.FRONTEND_BASE_URL }}
-          NODE_ENV: production
+          sudo docker-compose --env-file ./docker-compose.env -f docker-compose.yml pull
+          sudo docker-compose --env-file ./docker-compose.env -f docker-compose.yml up -d --remove-orphans
 ```
 
 ---
@@ -1255,9 +1268,7 @@ The backend service is built using Node.js and Express, with Python dependencies
 
 ### Database Connection:
 
-The backend connects to MongoDB using the `MONGO_URI` environment variable, which is configured in `docker-compose.yml` to point to the `mongodb` service within the Docker network:
-`mongodb://adminUser:${MONGO_PASSWORD}@mongodb:27017/yaliaero_db?authSource=admin`
-This ensures secure and internal communication with the database.
+The backend connects to DocumentDB using the `MONGO_URI` environment variable, which is configured as a GitHub Secret. This ensures secure communication with the database.
 
 ### API Access:
 
