@@ -235,7 +235,7 @@ Replace "your-key-file.pem" with your actual key file name
 
 1. In Terminal, run:
 
-```
+```bash
 
 ssh -i your-key-file.pem ubuntu@your-public-ip
 
@@ -717,7 +717,7 @@ You will create two separate repositories: one for the backend image and one for
 
 ### Step 2: Retrieve Repository URI
 
-After creation, note down the repository URI for both repositories. It will be in the format `<aws_account_id>.dkr.ecr.<your-aws-region>.amazonaws.com/yaliaero-backend`. You will use this URI in your GitHub Actions workflow.
+After creation, note down the repository URI for both repositories. It will be in the format `<aws_account_id>.dk
 
 ---
 
@@ -1006,67 +1006,166 @@ The deployment process is now fully automated through GitHub Actions:
     - New containers are created with fresh images by `docker-compose up -d`
     - Containers run in detached mode
 
-### Step 4: Configure Domain and SSL
+### Step 4: Configure Domain, SSL, and Firewall
 
-1.  **Configure Your Domain**:
+This section provides a comprehensive guide on purchasing a domain via Route 53, configuring it to point to your EC2 instance, setting up SSL for security, updating your Nginx configuration, and securing your server with a firewall.
 
-    - Go to your domain registrar's website
-    - Add an A record pointing to your EC2 public IP
-    - Wait for DNS propagation (can take up to 48 hours)
+#### How to Buy a Domain on Route 53 and Set It Up with an EC2 Instance
 
-    ### Using AWS Route 53 for Domain Management
+This guide is a step-by-step process for buying a domain name directly from AWS Route 53 and then linking it to your EC2 instance. This process is the next logical step to make your application publicly accessible via a custom domain.
 
-    AWS Route 53 is a highly available and scalable Domain Name System (DNS) web service. If your domain is registered with AWS or another registrar, you can use Route 53 to manage its DNS records.
+**Step 1: Register Your Domain Name in Route 53**
 
-    1.  **Register a New Domain in Route 53 (if you don't have one)**:
+1.  Sign in to your AWS Management Console.
+2.  Search for and open the Route 53 service.
+3.  In the left-hand navigation pane, choose **Domains** and then **Registered domains**.
+4.  Choose the **Register domains** button.
+5.  Search for the domain name you want to buy (e.g., `my-project-domain.com`) to check if it's available.
+6.  If the domain is available, add it to your cart and proceed to checkout.
+7.  Fill in your contact details, choose the registration period, and agree to the terms and conditions.
+8.  Complete the purchase. AWS will automatically create a public hosted zone for your new domain.
 
-        - Navigate to the Route 53 service in the AWS Management Console.
-        - In the left sidebar, click on "Registered domains" and then "Register domain".
-        - Enter the domain name you want (e.g., [suspicious link removed]) and click "Check".
-        - If the domain is available, follow the prompts to complete the registration process. This includes providing your contact information and payment details.
+**Step 2: Get an Elastic IP for Your EC2 Instance**
 
-    2.  **Create a Hosted Zone in Route 53**:
+An Elastic IP is a static IP address that won't change even if you stop and restart your EC2 instance. This is important for ensuring your domain name always points to the correct location.
 
-        - Navigate to the Route 53 service in the AWS Management Console.
-        - Click on "Hosted zones" in the left sidebar.
-        - Click "Create hosted zone".
-        - Enter your domain name (e.g., `yourdomain.com`).
-        - Select "Public hosted zone".
-        - Click "Create hosted zone".
+1.  In the AWS console, go to the EC2 dashboard.
+2.  In the navigation pane, under "Network & Security," select **Elastic IPs**.
+3.  Click **Allocate Elastic IP address**.
+4.  Once the IP is allocated, select it, click on the **Actions** dropdown menu, and choose **Associate Elastic IP address**.
+5.  Associate the IP with your running EC2 instance. Note this IP address for the next step.
 
-    3.  **(optional if you purchase from other domain server)Update Your Domain Registrar's Name Servers**:
+**Step 3: Create a Record to Link the Domain to Your EC2 Instance**
 
-        - After creating the hosted zone, Route 53 will provide you with a set of Name Server (NS) records. These typically look like `ns-xxxx.awsdns-xx.org.`, `ns-xxxx.awsdns-xx.net.`, etc.
-        - Go to your domain registrar's website (where you purchased your domain name).
-        - Find the DNS management or Name Server settings for your domain.
-        - Replace the existing Name Servers with the ones provided by Route 53.
-        - **Note**: DNS changes can take some time to propagate across the internet (up to 48 hours, though often much faster).
+1.  Go back to the Route 53 console.
+2.  Choose **Hosted zones** in the navigation pane.
+3.  Click on the name of the hosted zone that was automatically created for your new domain.
+4.  Choose **Create record**.
+5.  On the "Quick create" page, specify the following values:
+    -   **Record name**: Leave this blank to point your main domain (e.g., `example.com`) to the EC2 instance. If you want to use a subdomain like `www`, enter `www` here.
+    -   **Record type**: Select **A - Routes traffic to an IPv4 address and some AWS resources**.
+    -   **Value/Route traffic to**: Enter the Elastic IP address you allocated and associated with your EC2 instance in Step 2.
+6.  Click **Create records**.
 
-    4.  **Create an 'A' Record in Route 53**:
+Your domain name is now configured to point to your EC2 instance. It may take a few minutes for the changes to take effect across the internet. After this, you have to change the Nginx file in the frontend and in the EC2 instance, and the GitHub secret `FRONTEND_BASE_URL` to the domain you have purchased.
 
-        - In your Route 53 hosted zone, click "Create record".
-        - For "Record name", leave it blank if you are configuring the root domain (e.g., `yourdomain.com`), or enter a subdomain (e.g., `www`).
-        - For "Record type", select "A - Routes traffic to an IPv4 address and some AWS resources".
-        - For "Value", enter your EC2 instance's Public IPv4 address.
-        - For "TTL (Seconds)", you can use the default or set it to a value like 300.
-        - Click "Create records".
+#### Mission 1: Get a Security Certificate (The SSL Key)
 
-    By using Route 53, you centralize your domain management within AWS, which can simplify the deployment process, especially when integrating with other AWS services.
+Your Nginx server needs a special key to handle secure, "HTTPS" traffic. You get this key with a free tool called Certbot. This step must be done on your EC2 instance.
 
-2.  **Set Up SSL Certificate**:
-
+1.  **SSH into Your EC2 Instance**: Use the command you used before to connect to your server.
+2.  **Prerequisite**:
     ```bash
-    # Get SSL certificate for your domain
-    sudo certbot --nginx -d yourdomain.com
-    # Follow the prompts to configure HTTPS
+    sudo apt install certbot python3-certbot-nginx -y
     ```
-
-3.  **Verify SSL Configuration**:
-
+3.  **Run Certbot**: You need to run a command that tells Certbot to get a key for your new domain. It will also ask you for your email address.
     ```bash
-    # Test SSL renewal
-    sudo certbot renew --dry-run
+    sudo certbot --nginx -d yourdomain.com -d www.yourdomain.com
     ```
+    -   `sudo`: This is like saying "please do this as a superuser."
+    -   `certbot --nginx`: This tells the tool to get a security key and to set it up for your Nginx server.
+    -   `-d yourdomain.com -d www.yourdomain.com`: This tells Certbot the names of your website. Make sure to use your real domain name!
+4.  **Follow the Instructions**: Certbot will ask you a few questions. The most important one is to provide an email for renewal notices. It will then automatically make the changes to your Nginx configuration to point to the new certificate.
+
+#### Mission 2: Change Your Nginx Code
+
+You already have an Nginx configuration file, but it still has `localhost` in it. You need to change that so it knows to listen for your new domain name.
+
+1.  **Open the Nginx Configuration File**: Use a text editor like `nano` to open your Nginx file on the server.
+    ```bash
+    sudo nano /etc/nginx/sites-available/yaliaero.conf
+    ```
+2.  **Make the Changes**: Find the two lines that say `server_name localhost;` and change them to:
+    ```nginx
+    server_name yourdomain.com www.yourdomain.com;
+    ```
+    You should also double-check that the `ssl_certificate` and `ssl_certificate_key` lines are pointing to your new domain's certificate files (e.g., `/etc/letsencrypt/live/yourdomain.com/fullchain.pem`). Certbot usually does this for you, but it's good to check.
+3.  **Save and Exit**: Press `Ctrl+X`, then `Y`, then `Enter` to save the file.
+4.  **Change in the client-vite/frontend-nginx.conf**: Change `localhost` to the domain.
+    From:
+    ```nginx
+    server {
+         listen 80;
+         server_name localhost
+    ```
+    To:
+    ```nginx
+    server {
+         listen 80;
+         server_name yourdomain.com www.yourdomain.com;
+    ```
+5.  Then in the GitHub secrets change the `FRONTEND_BASE_URL` to `https://yourdomain.com`.
+
+#### Mission 3: Tell Nginx to Use the New Code
+
+After changing the file, Nginx needs a restart to use the new settings.
+
+1.  **Test the Configuration**: Always test your Nginx changes before reloading to make sure you didn't make a mistake.
+    ```bash
+    sudo nginx -t
+    ```
+    If it says "syntax is ok" and "test is successful," you're good to go!
+2.  **Reload Nginx**: Run this command to apply the new settings.
+    ```bash
+    sudo systemctl reload nginx
+    ```
+    Now, Nginx is listening for your domain name.
+
+#### Mission 4: Check if It Worked!
+
+The final and most exciting step is to check if everything is working.
+
+-   **At first, you put in http or https?**: When you first try your website, you can type `http://yourdomain.com`. However, because you set up the `return 301 https://$host$request_uri;` line, your browser will be automatically and instantly redirected to `https://yourdomain.com`. This is a permanent redirection that tells the browser to always use the secure version of your site.
+-   **How to Verify**: Open a web browser and type in your domain name. If everything worked, you should see your website. To verify that you are using a secure connection, look for a padlock icon in the browser's address bar. This icon means your site is secure and using the SSL key you just created.
+
+#### Firewall setup
+
+It's a great idea to add a firewall! A firewall is like a security guard for your server, making sure only trusted visitors (traffic) can get in. Since you're using an Ubuntu EC2 instance, the simplest firewall to use is UFW (Uncomplicated Firewall).
+
+Here is a step-by-step guide to set it up:
+
+**Step 1: Install UFW**
+
+Most modern Ubuntu versions already have UFW installed. You can check its status with this command:
+```bash
+sudo ufw status
+```
+If it says `inactive`, you're good to go. If it says `command not found`, you'll need to install it:
+```bash
+sudo apt update
+sudo apt install ufw
+```
+
+**Step 2: Open Necessary Doors (Ports)**
+
+This is the most important part. You need to tell the firewall which "doors" it can leave open. If you don't do this, you'll be locked out of your own server! You need to open ports for:
+
+-   **SSH (Port 22)**: This lets you connect to your server to run commands.
+-   **HTTP (Port 80)**: This allows visitors to see your website using `http://`.
+-   **HTTPS (Port 443)**: This allows secure traffic for your website using `https://`.
+
+Run these commands one by one on your EC2 instance:
+```bash
+sudo ufw allow 22/tcp  # Allows SSH access
+sudo ufw allow 80/tcp  # Allows HTTP traffic
+sudo ufw allow 443/tcp # Allows HTTPS traffic
+```
+
+**Step 3: Turn the Firewall On**
+
+After you've opened the necessary doors, it's safe to turn the firewall on. Run this command:
+```bash
+sudo ufw enable
+```
+You'll see a warning that this command may disrupt existing SSH connections. Type `y` and press `Enter` to confirm. This is okay because you already allowed SSH access in the previous step.
+
+**Step 4: Verify Everything**
+
+To make sure your firewall is on and the correct doors are open, run this command:
+```bash
+sudo ufw status verbose
+```
+You should see a list of the rules you just added, confirming that ports 22, 80, and 443 are all allowed.
 
 ### Step 5: Verify Deployment
 
